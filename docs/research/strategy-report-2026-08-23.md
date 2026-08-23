@@ -12,6 +12,8 @@ Chọn **Donchian breakout 100/50 + volatility target 30%, chia đều BTC và E
 
 Đây chưa phải chiến lược đủ điều kiện dùng tiền thật. Nó được chọn vì cân bằng tốt nhất giữa bằng chứng, độ đơn giản, độ bền tham số và kiểm soát thua lỗ; không phải vì có lợi nhuận backtest cao nhất.
 
+Phần đối chiếu riêng với Warren Buffett, Ray Dalio, David Harding, Paul Tudor Jones, Jim Simons và Michael Saylor nằm trong [investor-principles-fit-2026-08-23.md](investor-principles-fit-2026-08-23.md). Kết luận bổ sung: ứng viên phù hợp với systematic trend following nhưng chỉ nên được xem là một ngăn chiến lược crypto, chưa phải danh mục đầu tư hoàn chỉnh.
+
 ## Nguồn và điều rút ra
 
 1. [A Century of Evidence on Trend-Following Investing](https://www.aqr.com/Insights/Research/Journal-Article/A-Century-of-Evidence-on-Trend-Following-Investing), Hurst, Ooi và Pedersen: trend following/time-series momentum có bằng chứng dài hạn trên nhiều thị trường và nhiều điều kiện kinh tế. Đây là bằng chứng cho **họ chiến lược**, không phải bằng chứng rằng đúng bộ số Donchian 100/50 sẽ tiếp tục có lãi trên crypto.
