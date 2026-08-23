@@ -12,10 +12,19 @@ dependencies = [
 [dependency-groups]
 dev = [
     "pytest>=8.3,<9",
+    "ruff>=0.12,<1",
 ]
+
+[tool.ruff]
+line-length = 110
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]
 
 [project.scripts]
 quant-lab = "quant_lab.cli:main"
+quant-research = "quant_lab.research:main"
 
 [build-system]
 requires = ["hatchling"]

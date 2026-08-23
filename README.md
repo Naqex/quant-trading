@@ -36,6 +36,16 @@ uv run quant-lab backtest --symbol BTCUSDT --fast 50 --slow 200 --fee-bps 10 --s
 
 Kết quả được in ra màn hình và lưu trong `reports/`.
 
+## Chạy nghiên cứu so sánh chiến lược
+
+Tải dữ liệu cho các tài sản cần so sánh, sau đó chạy:
+
+```powershell
+uv run quant-research --symbols BTCUSDT ETHUSDT BNBUSDT SOLUSDT ADAUSDT --test-start 2023-01-01 --fee-bps 10 --slippage-bps 5
+```
+
+Quy trình sẽ so sánh buy-and-hold, moving average, momentum, Donchian breakout, RSI mean reversion và lớp volatility target; đồng thời kiểm tra các vùng tham số lân cận. Báo cáo quyết định hiện tại nằm tại [docs/research/strategy-report-2026-08-23.md](docs/research/strategy-report-2026-08-23.md).
+
 ## Cách dùng chiến lược trên mạng
 
 Chỉ lấy **ý tưởng và quy tắc**, không sao chép kết quả lợi nhuận. Mỗi ý tưởng phải đi qua cùng một quy trình:

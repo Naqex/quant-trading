@@ -40,3 +40,23 @@ def run_backtest(
             "drawdown": drawdown,
         }
     ).replace([np.inf, -np.inf], np.nan)
+
+
+def apply_volatility_target(
+    close: pd.Series,
+    signal: pd.Series,
+    target_annual_volatility: float = 0.30,
+    lookback: int = 30,
+) -> pd.Series:
+    """Scale a spot signal down when recent volatility exceeds the target."""
+    if target_annual_volatility <= 0 or lookback <= 1:
+        raise ValueError("Volatility target must be positive and lookback greater than one.")
+    if not close.index.equals(signal.index):
+        raise ValueError("Close and signal indexes must match.")
+
+    realized_volatility = close.pct_change(fill_method=None).rolling(
+        lookback,
+        min_periods=lookback,
+    ).std(ddof=0) * np.sqrt(365)
+    scale = (target_annual_volatility / realized_volatility).clip(lower=0.0, upper=1.0)
+    return (signal * scale.fillna(0.0)).rename("signal")

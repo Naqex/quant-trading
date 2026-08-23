@@ -4,3 +4,4 @@ __pycache__/
 *.py[cod]
 data/raw/*.csv
 reports/*.csv
+reports/**/*.csv
