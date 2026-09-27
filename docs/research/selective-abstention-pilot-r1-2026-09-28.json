@@ -1,0 +1,52 @@
+{
+  "broker_access": false,
+  "calibration": {
+    "broker_access": false,
+    "calibration_accepted_count": 3,
+    "calibration_count": 5,
+    "calibration_coverage": 0.6,
+    "calibration_end_utc": 150,
+    "calibration_risk": 0.09999999999999964,
+    "calibration_sha256": "d912158c740e8904cbbacfecc322c0797c94796d2bf481a68c5396a80cb19942",
+    "cutoffs": {
+      "test_end_utc": 300,
+      "train_end_utc": 100,
+      "validation_end_utc": 200
+    },
+    "data_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "execution_capability": false,
+    "max_risk": 0.2,
+    "method": "uncertainty_threshold_selective_regression",
+    "model_cutoff_utc": 100,
+    "provider_access": false,
+    "receipt_sha256": "16137d0d329010c1ec26791fd5770b58d4dc8bcd724c974c482dbb48d047e026",
+    "schema": "selective-abstention-receipt-v1",
+    "status": "PREP_ONLY",
+    "target_coverage": 0.6,
+    "uncertainty_threshold": 0.3
+  },
+  "evaluation": {
+    "abstention_rate": 0.5,
+    "accepted_count": 2,
+    "broker_access": false,
+    "coverage": 0.5,
+    "cutoff_timestamp": 240,
+    "data_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "evaluation_sha256": "4b71f0003b8c5e3df7c281d8501970ffda81f4d6320daed629ce4ad4f642882c",
+    "execution_capability": false,
+    "policy_sha256": "16137d0d329010c1ec26791fd5770b58d4dc8bcd724c974c482dbb48d047e026",
+    "provider_access": false,
+    "receipt_sha256": "8ebba08247addd942df228254926a78dfd640b99c926a3a1be0e097169d51054",
+    "sample_count": 4,
+    "schema": "selective-abstention-receipt-v1",
+    "selective_risk": 0.05000000000000071,
+    "status": "PREP_ONLY"
+  },
+  "execution_capability": false,
+  "focused_test_command": "uv run pytest -q tests/quant_trading/test_selective_prediction.py",
+  "market_edge_claim": false,
+  "method": "uncertainty_threshold_selective_regression",
+  "provider_access": false,
+  "schema": "selective-abstention-pilot-receipt-v1",
+  "status": "PREP_ONLY"
+}

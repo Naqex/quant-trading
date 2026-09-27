@@ -38,6 +38,7 @@ rollback độc lập:
 - `quant_trading.distribution_drift`: Population Stability Index (PSI) với
   bin boundary chốt trước, smoothing explicit và fail-closed OOD/drift flag;
   chỉ là diagnostic governance, không phải regime label hay signal.
+- `quant_trading.selective_prediction`: uncertainty threshold abstention với coverage/risk receipt thuần offline;
 - `quant_trading.model_governance`: receipt champion/challenger thuần offline;
   yêu cầu cùng fixture/cutoff, holdout, calibration, decay và PSI preflight
   trước khi recommendation promote; rollback chỉ là review recommendation.
