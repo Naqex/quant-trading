@@ -105,6 +105,24 @@ def test_short_sample_uses_one_observation_tail_without_nan() -> None:
     assert result.sortino_zero_target == -1.0
 
 
+def test_large_finite_returns_do_not_overflow_intermediate_sums() -> None:
+    result = compute_risk_metrics(
+        returns=[-1.0e308, -1.0e308, 1.0e308],
+        timestamps_utc=[210, 220, 230],
+        alpha=0.75,
+        data_sha256=DATA_SHA,
+        cutoffs=CUTOFFS,
+        periods_per_year=1,
+    )
+    assert result.expected_shortfall_return == pytest.approx(-7.777777777777778e307)
+    assert result.mean_return == pytest.approx(-1.0e308 / 3.0)
+    assert all(
+        math.isfinite(float(value))
+        for value in result.as_dict().values()
+        if isinstance(value, (int, float))
+    )
+
+
 def test_receipt_is_deny_only_and_test_window_is_causal() -> None:
     result = compute_risk_metrics(
         returns=[-0.02, 0.01],
