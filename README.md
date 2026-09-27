@@ -23,6 +23,10 @@ rollback độc lập:
   Miller–Madow explicit và Beta–Bernoulli Bayesian update.
 - `quant_trading.conformal`: split-conformal interval cho point forecast đã có,
   với calibration/validation/test cutoff theo thời gian.
+- `quant_trading.change_detection`: CUSUM hai phía để chẩn đoán change-point,
+  với baseline/threshold explicit và reset policy tái lập.
+- `quant_trading.risk_metrics`: empirical VaR/CVaR, downside deviation và
+  Sortino có trạng thái defined rõ ràng trên từng research window.
 - `quant_trading.theory_receipts`: receipt bất biến cho hypothesis/scenario,
   ghi provenance, hash, cutoff và baseline.
 
