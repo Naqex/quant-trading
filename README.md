@@ -35,6 +35,9 @@ rollback độc lập:
   Sortino có trạng thái defined rõ ràng trên từng research window.
 - `quant_trading.theory_receipts`: receipt bất biến cho hypothesis/scenario,
   ghi provenance, hash, cutoff và baseline.
+- `quant_trading.distribution_drift`: Population Stability Index (PSI) với
+  bin boundary chốt trước, smoothing explicit và fail-closed OOD/drift flag;
+  chỉ là diagnostic governance, không phải regime label hay signal.
 
 Các primitive này chỉ nhận fixture đã capture, không gọi provider/broker/network
 và luôn giữ `execution_capability=false`. BOCPD/change-point, regime label,
