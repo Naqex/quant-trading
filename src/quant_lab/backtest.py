@@ -11,14 +11,27 @@ def run_backtest(
     slippage_bps: float = 5.0,
 ) -> pd.DataFrame:
     """Backtest a long/cash spot strategy with next-bar execution."""
+    if not np.isfinite(fee_bps) or not np.isfinite(slippage_bps):
+        raise ValueError("Trading costs must be finite.")
     if fee_bps < 0 or slippage_bps < 0:
         raise ValueError("Trading costs cannot be negative.")
+    if fee_bps + slippage_bps >= 10_000:
+        raise ValueError("Combined trading costs must be less than 100% per unit turnover.")
     if not close.index.equals(signal.index):
         raise ValueError("Close and signal indexes must match.")
-    if not signal.fillna(0).between(0, 1).all():
+    if close.empty:
+        raise ValueError("Close and signal cannot be empty.")
+    if not close.index.is_unique or not close.index.is_monotonic_increasing:
+        raise ValueError("Close and signal indexes must be unique and sorted ascending.")
+
+    close = close.astype(float)
+    signal = signal.astype(float)
+    if not np.isfinite(close.to_numpy()).all() or (close <= 0).any():
+        raise ValueError("Close prices must be finite and strictly positive.")
+    if not np.isfinite(signal.fillna(0).to_numpy()).all() or not signal.fillna(0).between(0, 1).all():
         raise ValueError("Spot strategy signal must stay between 0 and 1.")
 
-    asset_return = close.astype(float).pct_change().fillna(0.0)
+    asset_return = close.pct_change(fill_method=None).fillna(0.0)
     # A signal calculated using today's close can only be held from the next bar.
     position = signal.fillna(0.0).shift(1, fill_value=0.0)
     turnover = position.diff().abs()
@@ -30,8 +43,8 @@ def run_backtest(
 
     return pd.DataFrame(
         {
-            "close": close.astype(float),
-            "signal": signal.astype(float),
+            "close": close,
+            "signal": signal,
             "position": position,
             "asset_return": asset_return,
             "turnover": turnover,

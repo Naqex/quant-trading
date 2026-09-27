@@ -32,6 +32,39 @@ def test_rejects_leverage_in_spot_lab() -> None:
         run_backtest(close, signal)
 
 
+@pytest.mark.parametrize("cost", [float("nan"), float("inf"), float("-inf")])
+def test_rejects_nonfinite_trading_costs(cost: float) -> None:
+    close = pd.Series([100.0, 101.0])
+    signal = pd.Series([0.0, 1.0])
+
+    with pytest.raises(ValueError, match="finite"):
+        run_backtest(close, signal, fee_bps=cost)
+
+
+def test_rejects_costs_that_can_make_equity_negative() -> None:
+    close = pd.Series([100.0, 101.0])
+    signal = pd.Series([0.0, 1.0])
+
+    with pytest.raises(ValueError, match="less than 100%"):
+        run_backtest(close, signal, fee_bps=9_000, slippage_bps=1_000)
+
+
+@pytest.mark.parametrize("bad_close", [pd.Series([100.0, float("nan")]), pd.Series([100.0, 0.0])])
+def test_rejects_invalid_close_prices(bad_close: pd.Series) -> None:
+    signal = pd.Series([0.0, 1.0])
+
+    with pytest.raises(ValueError, match="strictly positive"):
+        run_backtest(bad_close, signal)
+
+
+def test_rejects_unsorted_or_duplicate_dates() -> None:
+    signal = pd.Series([0.0, 1.0], index=[1, 0])
+    close = pd.Series([100.0, 101.0], index=[1, 0])
+
+    with pytest.raises(ValueError, match="unique and sorted"):
+        run_backtest(close, signal)
+
+
 def test_volatility_target_never_adds_leverage() -> None:
     close = pd.Series([100.0, 120.0, 90.0, 130.0, 80.0])
     signal = pd.Series(1.0, index=close.index)
