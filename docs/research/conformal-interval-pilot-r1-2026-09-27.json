@@ -1,0 +1,23 @@
+{
+  "schema": "split-conformal-receipt-v1",
+  "status": "PREP_ONLY",
+  "method": "split_conformal_absolute_residual",
+  "alpha": 0.25,
+  "quantile": 3.0,
+  "calibration_count": 4,
+  "calibration_end_utc": 150,
+  "residual_sha256": "f7ce9656dee0657b35bdb59dab30f175b25803e44ceeebd62c38121cd300e754",
+  "calibration_sha256": "745f080242f27ed2ad6fef19078b0f2d0cda117cc03a5b659c9b39898f49a16b",
+  "data_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "model_cutoff_utc": 100,
+  "cutoffs": {
+    "train_end_utc": 100,
+    "validation_end_utc": 200,
+    "test_end_utc": 300
+  },
+  "execution_capability": false,
+  "provider_access": false,
+  "broker_access": false,
+  "focused_test_command": "uv run pytest -q tests/quant_trading/test_conformal.py",
+  "focused_tests_passed": 9
+}
