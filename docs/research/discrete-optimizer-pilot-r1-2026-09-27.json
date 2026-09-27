@@ -34,6 +34,6 @@
   "diff_check": "pass (pilot files)",
   "edge_claim": false,
   "production_claim": false,
-  "validation_head": "ef34b09",
+  "validation_head": "e82c7cf",
   "optimizer_commit": "e82c7cf"
 }
