@@ -1,0 +1,37 @@
+{
+  "schema": "discrete-optimizer-receipt-v1",
+  "status": "PREP_ONLY",
+  "solver": "numpy",
+  "solver_version": "numpy-exact-enum-v1",
+  "method": "exact_enum",
+  "seed": 0,
+  "selected_bits": [
+    1,
+    1,
+    0
+  ],
+  "objective_value": -4.0,
+  "objective_sha256": "a302853bec7cdf358e2776a5f2dcf8d14445bb9752d781178ab5f30823370bec",
+  "problem_sha256": "a302853bec7cdf358e2776a5f2dcf8d14445bb9752d781178ab5f30823370bec",
+  "data_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "cutoffs": {
+    "train_end_utc": 100,
+    "validation_end_utc": 200,
+    "test_end_utc": 300
+  },
+  "feasible": true,
+  "evaluations": 8,
+  "execution_capability": false,
+  "provider_access": false,
+  "broker_access": false,
+  "receipt_scope": "synthetic toy fixture",
+  "focused_test": "tests/test_discrete_optimizer.py",
+  "focused_test_count": 4,
+  "full_quant_test_command": "uv run pytest -q",
+  "full_quant_test_count": 46,
+  "compileall": "pass (pilot module)",
+  "ruff": "pass",
+  "diff_check": "pass (pilot files)",
+  "edge_claim": false,
+  "production_claim": false
+}
