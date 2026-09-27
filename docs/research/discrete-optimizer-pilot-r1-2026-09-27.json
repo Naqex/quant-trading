@@ -26,14 +26,14 @@
   "broker_access": false,
   "receipt_scope": "synthetic toy fixture",
   "focused_test": "tests/test_discrete_optimizer.py",
-  "focused_test_count": 4,
+  "focused_test_count": 6,
   "full_quant_test_command": "uv run pytest -q",
-  "full_quant_test_count": 46,
+  "full_quant_test_count": 48,
   "compileall": "pass (full src/quant_trading)",
   "ruff": "pass (full quant_trading sources/tests)",
   "diff_check": "pass (pilot files)",
   "edge_claim": false,
   "production_claim": false,
-  "validation_head": "9f61de7",
-  "optimizer_commit": "7f2cedb"
+  "validation_head": "ef34b09",
+  "optimizer_commit": "ef34b09"
 }

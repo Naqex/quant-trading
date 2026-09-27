@@ -37,7 +37,7 @@ Focused validation:
 
 ```powershell
 uv run pytest -q tests/test_discrete_optimizer.py
-# 4 passed
+# 6 passed
 uv run ruff check src/quant_trading tests/quant_trading tests/test_discrete_optimizer.py
 # pass
 uv run python -m compileall -q src/quant_trading
