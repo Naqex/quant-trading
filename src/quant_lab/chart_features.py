@@ -13,6 +13,7 @@ import hashlib
 import json
 import math
 import re
+from bisect import bisect_right
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from typing import Any
@@ -482,6 +483,64 @@ def build_strategy_research_contract(
     )
 
 
+def build_causal_signal(
+    timestamps: Iterable[int],
+    events: Iterable[ChartEvent | Mapping[str, Any]],
+    *,
+    cutoff_timestamp: int | None = None,
+    holdout_from_utc: int | None = None,
+    instrument_id: str | None = None,
+    timeframe_seconds: int | None = None,
+) -> tuple[float, ...]:
+    """Project confirmed chart events onto a long/cash next-bar signal.
+
+    ``timestamps`` must use the same UTC-second unit as ``ChartEvent.known_at``.
+    An event known at ``t`` can first affect the signal at the first timestamp
+    strictly greater than ``t``.  This keeps the adapter causal; fills, fees,
+    slippage and equity accounting remain owned by :func:`run_backtest`.
+    Tentative and invalidated events are intentionally ignored.  A bearish
+    confirmed event exits the spot position, while a bullish one enters it.
+    """
+
+    timeline = tuple(timestamps)
+    previous: int | None = None
+    for timestamp in timeline:
+        _strict_int(timestamp, "timestamps", minimum=0)
+        if previous is not None and timestamp <= previous:
+            raise ChartResearchContractError("timestamps must be strictly increasing")
+        previous = timestamp
+
+    normalized_events = validate_chart_events(
+        events,
+        cutoff_timestamp=cutoff_timestamp,
+        holdout_from_utc=holdout_from_utc,
+    )
+    if instrument_id is not None:
+        _non_empty_text(instrument_id, "instrument_id", maximum=128)
+    if timeframe_seconds is not None:
+        _strict_int(timeframe_seconds, "timeframe_seconds", minimum=1)
+
+    changes: dict[int, float] = {}
+    for event in normalized_events:
+        if instrument_id is not None and event.instrument_id != instrument_id:
+            raise ChartResearchContractError("chart events must match instrument_id")
+        if timeframe_seconds is not None and event.timeframe_seconds != timeframe_seconds:
+            raise ChartResearchContractError("chart events must match timeframe_seconds")
+        if event.state != "confirmed" or event.direction == "neutral":
+            continue
+        first_effective_index = bisect_right(timeline, event.known_at)
+        if first_effective_index < len(timeline):
+            changes[first_effective_index] = 1.0 if event.direction == "bullish" else 0.0
+
+    signal: list[float] = []
+    current = 0.0
+    for index in range(len(timeline)):
+        if index in changes:
+            current = changes[index]
+        signal.append(current)
+    return tuple(signal)
+
+
 __all__ = [
     "CHART_EVENT_SCHEMA",
     "STRATEGY_RESEARCH_SCHEMA",
@@ -491,6 +550,7 @@ __all__ = [
     "StrategyResearchContract",
     "WalkForwardFold",
     "WalkForwardPlan",
+    "build_causal_signal",
     "build_strategy_research_contract",
     "validate_chart_events",
 ]

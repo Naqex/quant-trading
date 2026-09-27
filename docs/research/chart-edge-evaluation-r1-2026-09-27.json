@@ -1,0 +1,34 @@
+{
+  "schema": "chart-edge-evaluation-receipt-v1",
+  "status": "PREP_ONLY",
+  "scope": "offline causal chart-event projection and risk accounting",
+  "event_schema": "chart-event-v1",
+  "execution_timing": "closed_bar_next_open",
+  "holdout_access": false,
+  "execution_capability": false,
+  "provider_access": false,
+  "broker_access": false,
+  "network_access": false,
+  "causal_signal": {
+    "confirmed_bullish": 1.0,
+    "confirmed_bearish": 0.0,
+    "tentative_or_invalidated": "ignored",
+    "same_bar_execution": false
+  },
+  "risk_metrics": [
+    "downside_deviation",
+    "sortino_zero_rate",
+    "profit_factor",
+    "expected_shortfall_95",
+    "worst_period_return",
+    "max_loss_streak"
+  ],
+  "focused_test_command": "uv run pytest -q tests/test_chart_features.py tests/test_backtest.py tests/test_research_provenance.py",
+  "focused_test_count": 24,
+  "full_quant_test_command": "uv run pytest -q",
+  "full_quant_test_count": 36,
+  "compileall": "pass",
+  "ruff": "pass",
+  "edge_claim": false,
+  "production_claim": false
+}

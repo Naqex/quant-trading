@@ -6,6 +6,7 @@ from quant_lab.chart_features import (
     CostModel,
     WalkForwardFold,
     WalkForwardPlan,
+    build_causal_signal,
     build_strategy_research_contract,
     validate_chart_events,
 )
@@ -150,3 +151,48 @@ def test_walk_forward_rejects_oos_overlap_and_holdout_reach():
         WalkForwardPlan(timeframe_seconds=60, folds=(first, second))
     with pytest.raises(ChartResearchContractError, match="holdout"):
         plan(holdout_from_utc=179)
+
+
+def test_causal_signal_uses_confirmed_event_on_next_timestamp() -> None:
+    events = [
+        event("bull", known_at=100, anchor_timestamp=100),
+        ChartEvent(
+            event_id="bear",
+            kind="CHoCH",
+            direction="bearish",
+            instrument_id="BTCUSDT",
+            timeframe_seconds=60,
+            anchor_timestamp=160,
+            known_at=160,
+            source_bar_ids=("bar-3",),
+            price_low=100.0,
+            price_high=101.0,
+            state="confirmed",
+            confirmation_lag_bars=0,
+            rule_version="smc-v1",
+        ),
+    ]
+
+    assert build_causal_signal((100, 160, 220, 280), events) == (0.0, 1.0, 0.0, 0.0)
+
+
+def test_causal_signal_ignores_unconfirmed_and_rejects_bad_timestamps() -> None:
+    tentative = ChartEvent(
+        event_id="tentative",
+        kind="BOS",
+        direction="bullish",
+        instrument_id="BTCUSDT",
+        timeframe_seconds=60,
+        anchor_timestamp=100,
+        known_at=100,
+        source_bar_ids=("bar-1",),
+        price_low=100.0,
+        price_high=101.0,
+        state="tentative",
+        confirmation_lag_bars=0,
+        rule_version="smc-v1",
+    )
+    assert build_causal_signal((100, 160), [tentative]) == (0.0, 0.0)
+
+    with pytest.raises(ChartResearchContractError, match="strictly increasing"):
+        build_causal_signal((100, 100), [])

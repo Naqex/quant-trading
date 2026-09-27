@@ -1,7 +1,9 @@
+import numpy as np
 import pandas as pd
 import pytest
 
 from quant_lab.backtest import apply_volatility_target, run_backtest
+from quant_lab.metrics import performance_metrics
 
 
 def test_signal_is_executed_on_next_bar() -> None:
@@ -73,3 +75,17 @@ def test_volatility_target_never_adds_leverage() -> None:
 
     assert sized.between(0, 1).all()
     assert sized.iloc[:2].tolist() == [0.0, 0.0]
+
+
+def test_performance_metrics_expose_downside_and_tail_risk() -> None:
+    close = pd.Series([100.0, 102.0, 100.0, 99.0, 101.0, 100.0])
+    signal = pd.Series([1.0] * len(close))
+    result = run_backtest(close, signal, fee_bps=0, slippage_bps=0)
+
+    metrics = performance_metrics(result, periods_per_year=1)
+
+    assert metrics["downside_deviation"] > 0
+    assert np.isfinite(metrics["sortino_zero_rate"])
+    assert metrics["expected_shortfall_95"] <= 0
+    assert metrics["worst_period_return"] < 0
+    assert metrics["max_loss_streak"] == 2
