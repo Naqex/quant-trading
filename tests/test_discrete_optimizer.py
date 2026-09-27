@@ -113,3 +113,34 @@ def test_no_feasible_assignment_and_unsafe_sa_parameters_fail_closed() -> None:
             initial_temperature=1,
             final_temperature=2,
         )
+
+
+def test_sa_handles_extreme_temperature_ratio_without_underflow() -> None:
+    result = solve_simulated_annealing(
+        QUBOProblem((-1.0,), ((0.0,),)),
+        data_sha256=DATA_SHA,
+        cutoffs=CUTOFFS,
+        seed=0,
+        steps=3,
+        restarts=1,
+        initial_temperature=1e308,
+        final_temperature=1e-308,
+    )
+    assert result.bits == (1,)
+
+
+def test_sa_bounded_feasible_search_handles_a_sparse_seventeen_variable_solution() -> None:
+    problem = QUBOProblem(
+        linear=tuple(-float(index + 1) for index in range(17)),
+        quadratic=np.zeros((17, 17)),
+        constraints=(BinaryConstraint(np.ones(17), "==", 17.0),),
+    )
+    result = solve_simulated_annealing(
+        problem,
+        data_sha256=DATA_SHA,
+        cutoffs=CUTOFFS,
+        seed=0,
+        steps=1,
+        restarts=1,
+    )
+    assert result.bits == (1,) * 17

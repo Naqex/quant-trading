@@ -420,7 +420,7 @@ def _random_feasible_start(problem: QUBOProblem, rng: np.random.Generator) -> tu
         candidate = tuple(int(value) for value in rng.integers(0, 2, size=problem.variables))
         if problem.is_feasible(candidate):
             return candidate
-    if problem.variables <= 16:
+    if problem.variables <= 20:
         for mask in range(1 << problem.variables):
             candidate = tuple((mask >> index) & 1 for index in range(problem.variables))
             if problem.is_feasible(candidate):
@@ -471,6 +471,8 @@ def solve_simulated_annealing(
         raise DiscreteOptimizerError("final_temperature must be <= initial_temperature")
 
     rng = np.random.default_rng(seed)
+    log_initial_temperature = math.log(initial_temperature)
+    log_final_temperature = math.log(final_temperature)
     best_bits: tuple[int, ...] | None = None
     best_value = math.inf
     evaluations = 0
@@ -493,7 +495,11 @@ def solve_simulated_annealing(
                 temperature = initial_temperature
             else:
                 fraction = step / (steps - 1)
-                temperature = initial_temperature * (final_temperature / initial_temperature) ** fraction
+                # Log-space interpolation keeps every temperature positive even
+                # when the endpoint ratio underflows in float64.
+                temperature = math.exp(
+                    log_initial_temperature + (log_final_temperature - log_initial_temperature) * fraction
+                )
             accept = delta <= 0
             if not accept:
                 exponent = -delta / temperature
