@@ -16,6 +16,11 @@ walk-forward, đồng thời ghi được fingerprint để báo cáo có thể 
 - `candle_fingerprint` tạo SHA-256 ổn định từ biểu diễn chuẩn hóa của các cột
   OHLCV; `build_provenance` trả metadata versioned gồm nguồn, symbol, interval,
   khoảng thời gian, số dòng và digest.
+- `quant-research` ghi `reports/research/data_provenance.json` với digest của
+  từng dataset, cấu hình run (symbols, test split, fee/slippage) và danh sách
+  artifact. `strategy_summary.csv` và `parameter_robustness.csv` cũng mang
+  digest/schema/source trực tiếp trên từng dòng; `portfolio_test.csv` giữ map
+  provenance theo symbol.
 
 ## Giới hạn
 
@@ -23,3 +28,9 @@ Không kiểm chứng tính đúng của nguồn Binance, không phát hiện m�
 survivorship bias, không chứng minh edge, và không kết nối broker/live. Missing
 calendar days vẫn được cho phép vì crypto có thể có khoảng trống dữ liệu; bước
 walk-forward vẫn phải ghi rõ khoảng thời gian và data-quality report.
+
+## Kiểm chứng bổ sung
+
+Fixture offline 320 nến chạy toàn bộ `quant-research` với một symbol; test xác
+nhận sidecar, digest trên summary và digest map trong portfolio. Không tải dữ
+liệu mới và không gọi network.

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 from collections.abc import Callable
 from pathlib import Path
 
@@ -9,6 +10,7 @@ import pandas as pd
 from quant_lab.backtest import apply_volatility_target, run_backtest
 from quant_lab.data import load_candles
 from quant_lab.metrics import performance_metrics
+from quant_lab.provenance import build_provenance
 from quant_lab.strategies import (
     buy_and_hold_signal,
     donchian_breakout_signal,
@@ -52,7 +54,28 @@ def _close_series(symbol: str) -> pd.Series:
     path = DATA_DIRECTORY / f"{symbol.upper()}_1d.csv"
     if not path.exists():
         raise FileNotFoundError(f"Missing {path}. Download it first.")
-    return load_candles(path).set_index("open_time")["close"]
+    candles = load_candles(path)
+    close = candles.set_index("open_time")["close"]
+    close.attrs["provenance"] = build_provenance(
+        candles,
+        source=f"file:{path.as_posix()}",
+        symbol=symbol,
+        interval="1d",
+    )
+    return close
+
+
+def _report_provenance_fields(provenance: dict[str, str | int]) -> dict[str, str | int]:
+    return {
+        "data_schema_version": provenance["schema_version"],
+        "data_source": provenance["source"],
+        "data_symbol": provenance["symbol"],
+        "data_interval": provenance["interval"],
+        "data_rows": provenance["rows"],
+        "data_start": provenance["start"],
+        "data_end": provenance["end"],
+        "data_sha256": provenance["sha256"],
+    }
 
 
 def _rebase_period(backtest: pd.DataFrame) -> pd.DataFrame:
@@ -72,6 +95,7 @@ def evaluate_strategy(
     volatility_target: float | None = None,
 ) -> list[dict[str, object]]:
     close = _close_series(symbol)
+    provenance = close.attrs["provenance"]
     signal = factory(close)
     if volatility_target is not None:
         signal = apply_volatility_target(close, signal, volatility_target, lookback=30)
@@ -94,6 +118,7 @@ def evaluate_strategy(
                 "period": period_name,
                 "start": period.index.min().date().isoformat(),
                 "end": period.index.max().date().isoformat(),
+                **_report_provenance_fields(provenance),
                 **performance_metrics(period),
             }
         )
@@ -110,8 +135,10 @@ def evaluate_portfolio(
     volatility_target: float | None = None,
 ) -> dict[str, object]:
     sleeve_results: list[pd.DataFrame] = []
+    provenance_by_symbol: dict[str, dict[str, str | int]] = {}
     for symbol in symbols:
         close = _close_series(symbol)
+        provenance_by_symbol[symbol.upper()] = close.attrs["provenance"]
         signal = factory(close)
         if volatility_target is not None:
             signal = apply_volatility_target(close, signal, volatility_target, lookback=30)
@@ -149,6 +176,7 @@ def evaluate_portfolio(
         "strategy": name,
         "start": common_index.min().date().isoformat(),
         "end": common_index.max().date().isoformat(),
+        "data_provenance": json.dumps(provenance_by_symbol, sort_keys=True, separators=(",", ":")),
         **performance_metrics(portfolio),
     }
 
@@ -167,6 +195,7 @@ def yearly_returns(
 
 
 def run_research(args: argparse.Namespace) -> None:
+    symbols = sorted({symbol.upper() for symbol in args.symbols})
     rows: list[dict[str, object]] = []
     for symbol in args.symbols:
         for name, factory in STRATEGIES.items():
@@ -257,6 +286,31 @@ def run_research(args: argparse.Namespace) -> None:
         .sort_values(["median_calmar", "median_sharpe"], ascending=False)
     )
     aggregate.to_csv(REPORT_DIRECTORY / "test_aggregate.csv")
+    datasets = {
+        symbol: _close_series(symbol).attrs["provenance"]
+        for symbol in symbols
+    }
+    report_provenance = {
+        "schema_version": "research-report-provenance-v1",
+        "run": {
+            "symbols": symbols,
+            "test_start": args.test_start,
+            "fee_bps": float(args.fee_bps),
+            "slippage_bps": float(args.slippage_bps),
+        },
+        "datasets": datasets,
+        "artifacts": [
+            "strategy_summary.csv",
+            "parameter_robustness.csv",
+            "yearly_returns.csv",
+            "portfolio_test.csv",
+            "test_aggregate.csv",
+        ],
+    }
+    (REPORT_DIRECTORY / "data_provenance.json").write_text(
+        json.dumps(report_provenance, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
     with pd.option_context("display.max_columns", None, "display.width", 180):
         print(aggregate.round(4).to_string())
         print("\nEqual-capital portfolio | test")
