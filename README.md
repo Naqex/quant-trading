@@ -14,6 +14,23 @@ Một phòng thí nghiệm quant trading nhỏ, minh bạch và ưu tiên kiểm
 
 Đây là công cụ nghiên cứu, không phải khuyến nghị đầu tư hay cam kết lợi nhuận.
 
+## Primitive nghiên cứu offline
+
+Các pilot P0 được giữ tách khỏi backtest/execution để có thể tái lập và
+rollback độc lập:
+
+- `quant_trading.state_primitives`: Kalman forward-only, Shannon entropy có
+  Miller–Madow explicit và Beta–Bernoulli Bayesian update.
+- `quant_trading.conformal`: split-conformal interval cho point forecast đã có,
+  với calibration/validation/test cutoff theo thời gian.
+- `quant_trading.theory_receipts`: receipt bất biến cho hypothesis/scenario,
+  ghi provenance, hash, cutoff và baseline.
+
+Các primitive này chỉ nhận fixture đã capture, không gọi provider/broker/network
+và luôn giữ `execution_capability=false`. BOCPD/change-point, regime label,
+ABM, game/reflexivity, chaos/SOC/TDA và mọi candidate signal chỉ được thêm sau
+calibration, walk-forward/OOS, cost/stress và baseline evidence tương ứng.
+
 ## Cài đặt
 
 ```powershell
