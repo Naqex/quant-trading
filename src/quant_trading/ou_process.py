@@ -254,10 +254,30 @@ class OUFit:
             "cutoff_timestamp": self.cutoff_timestamp,
             "observation_sha256": self.observation_sha256,
             "config": self.config.as_dict(),
+            "stationarity_diagnostics": self.stationarity_diagnostics,
         }
 
     def canonical_sha256(self) -> str:
         return _sha256(self.as_dict())
+
+    @property
+    def transition_at_min_dt(self) -> float:
+        """Largest one-step transition coefficient in the fitted sample."""
+
+        return math.exp(-self.kappa * self.min_dt) if self.kappa * self.min_dt < 745.0 else 0.0
+
+    @property
+    def stationarity_diagnostics(self) -> dict[str, bool | float]:
+        """Explicit diagnostics retained with an accepted fit."""
+
+        transition = self.transition_at_min_dt
+        return {
+            "stationary_guard_passed": True,
+            "near_unit_root": transition >= 1.0 - self.config.stationarity_tolerance,
+            "transition_at_min_dt": transition,
+            "kappa_boundary": self.kappa <= self.config.min_kappa or self.kappa >= self.config.max_kappa,
+            "stationary_variance_positive": self.stationary_variance > 0,
+        }
 
 
 @dataclass(frozen=True)

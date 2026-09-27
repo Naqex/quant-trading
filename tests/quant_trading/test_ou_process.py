@@ -47,6 +47,9 @@ def test_ou_fit_handles_irregular_dt_and_is_deterministic() -> None:
     assert first.max_dt == 4.0
     assert 0.05 < first.kappa < 2.0
     assert first.stationary_variance > 0
+    assert first.stationarity_diagnostics["stationary_guard_passed"] is True
+    assert first.stationarity_diagnostics["near_unit_root"] is False
+    assert 0 < first.transition_at_min_dt < 1
     assert first.execution_capability is False
     assert first.provider_access is False
     assert first.broker_access is False
