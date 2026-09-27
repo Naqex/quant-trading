@@ -1,0 +1,40 @@
+{
+  "assumptions": {
+    "algorithm": "two-sided-cusum",
+    "baseline": 0.0,
+    "drift": 0.0,
+    "interpretation": "diagnostic-only; no signal or execution claim",
+    "ordering": "known_at,sequence,event_time",
+    "reset_on_detection": true,
+    "threshold": 3.0
+  },
+  "baseline": {
+    "name": "fixed-baseline",
+    "threshold": 3.0,
+    "value": 0.0
+  },
+  "broker_access": false,
+  "cutoff_timestamp": 4,
+  "data_hash": "98bfdd0e866ff1a589d7c04f97d6ec5fca3ca48ddf97e996cccc15dabb0a1705",
+  "execution_capability": false,
+  "hypothesis": "A forward-only CUSUM threshold crossing can flag a distributional shift relative to an explicit baseline.",
+  "known_at": 4,
+  "metrics": {
+    "detection_count": 1,
+    "directions": [
+      "positive"
+    ],
+    "observed_count": 4,
+    "result_sha256": "f27609ada2949b50ae3907acc43f6ec934a07a27008e6a9c017f7a491f9959b3"
+  },
+  "model_hash": "b6c26ecf1065ac3135c133055a4124ed2f40918b7b0213fd1609c15089350319",
+  "provider_access": false,
+  "receipt_hash": "919a58b043d5c2cf32f47e4366cd769ad859e88e05a15f4460a3a9758b33b9eb",
+  "result_status": "inconclusive",
+  "rollback_ref": "docs/research/cusum-change-detection-pilot-r1-2026-09-27.md",
+  "schema": "theory-hypothesis-receipt-v1",
+  "seed": 0,
+  "source_hash": "4658d94882bbc26cc0fae9f5e8e3864cccd234eed28e2eb1e9fa7d2af57e2279",
+  "theory_id": "regime.cusum-change",
+  "theory_version": "1.0.0"
+}
