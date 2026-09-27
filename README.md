@@ -42,6 +42,10 @@ rollback độc lập:
 - `quant_trading.model_governance`: receipt champion/challenger thuần offline;
   yêu cầu cùng fixture/cutoff, holdout, calibration, decay và PSI preflight
   trước khi recommendation promote; rollback chỉ là review recommendation.
+- `quant_trading.feature_registry`: registry DAG bất biến cho feature numeric;
+  pin source/rule/data hash, dependency lineage và explicit event/known/available
+  timestamps. Snapshot chỉ nhận dữ liệu đã khả dụng trước cutoff, loại duplicate,
+  stale/invalidated rows và luôn giữ execution/provider/broker capability false.
 
 Các primitive này chỉ nhận fixture đã capture, không gọi provider/broker/network
 và luôn giữ `execution_capability=false`. BOCPD/change-point, regime label,

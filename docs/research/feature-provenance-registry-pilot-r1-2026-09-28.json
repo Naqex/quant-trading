@@ -1,0 +1,33 @@
+{
+  "schema": "feature-provenance-registry-pilot-v1",
+  "status": "PREP_ONLY",
+  "date": "2026-09-28",
+  "module": "quant_trading.feature_registry",
+  "scope": "offline-point-in-time-feature-lineage",
+  "synthetic": true,
+  "execution_capability": false,
+  "provider_access": false,
+  "broker_access": false,
+  "synthetic_receipt": {
+    "registry_sha256": "a9ab31f026ee1af8633a2b132210268af6ca862fd5786683f89e0b3821f99e84",
+    "observation_sha256": "924111166c04b518145c1928e726fb60a0354e6c741eaef4811ba2ff81e66186",
+    "snapshot_sha256": "b1b23a0a7d8855e8aeef1f8d23f80f970e212408726bfd2fff5d83ca5a60351c",
+    "cutoff_timestamp_utc": 200
+  },
+  "gates": {
+    "event_known_available_order": true,
+    "cutoff_rejection": true,
+    "minimum_consumer_delay": true,
+    "dependency_dag_cycle_rejection": true,
+    "duplicate_logical_observation_rejection": true,
+    "stale_and_invalidated_rejection": true,
+    "revision_supersedes_reference": true,
+    "canonical_round_trip": true
+  },
+  "validation_command": "uv run pytest -q tests/quant_trading/test_feature_registry.py",
+  "promotion_blockers": [
+    "No captured multi-venue feature artifact",
+    "No out-of-sample or cost/stress result",
+    "No production scheduler or execution integration"
+  ]
+}
