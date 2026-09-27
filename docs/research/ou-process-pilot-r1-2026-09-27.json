@@ -1,0 +1,41 @@
+{
+  "schema": "theory-hypothesis-receipt-v1",
+  "theory_id": "ornstein_uhlenbeck_spread_residual",
+  "theory_version": "r1",
+  "hypothesis": "A stationary spread/residual can be represented by an exact irregular-time OU transition for state diagnostics.",
+  "source_hash": "8ed955b902d7de0f50c94e221ede6e46e1ac3dd3746eacfb7f991562d70677bf",
+  "data_hash": "61d6d039205edbe634b65aeac3e5e64615b9a80a6da72c2a1393b4a30971fa75",
+  "model_hash": "69c199a87d0af362c3b7b23faa2c94fa3eb12885bfbb563b60079bcf86139b01",
+  "cutoff_timestamp": 181,
+  "known_at": 181,
+  "seed": 0,
+  "assumptions": {
+    "series_kind": "spread",
+    "raw_price_supported": false,
+    "irregular_dt": true,
+    "stationarity_guard": true,
+    "execution_capability": false
+  },
+  "metrics": {
+    "observation_count": 72,
+    "kappa": 0.3846691925616353,
+    "mean_level": 0.4076947018946505,
+    "diffusion_variance_rate": 8.316183978702707e-05,
+    "stationary_variance": 0.0001080952691236147,
+    "half_life": 1.8019305781782429,
+    "min_dt": 1.0,
+    "max_dt": 4.0,
+    "log_likelihood": 232.2912475270368
+  },
+  "baseline": {
+    "random_walk": "rejected_if_profile_boundary_or_near_unit_root",
+    "promotion_status": "PREP_ONLY",
+    "alpha_claim": false
+  },
+  "result_status": "pending",
+  "execution_capability": false,
+  "provider_access": false,
+  "broker_access": false,
+  "rollback_ref": "quant-trading/ou-process-pilot-r1",
+  "receipt_hash": "78e8222667d6cb055e3b03e043ce01182b386c2f2a044a49c46ecd51a7d0857d"
+}
