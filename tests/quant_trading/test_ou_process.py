@@ -106,3 +106,14 @@ def test_ou_uses_stable_expm1_for_large_irregular_gaps() -> None:
 
     assert math.isfinite(fit.kappa)
     assert all(math.isfinite(item.conditional_variance) for item in result.estimates)
+
+
+def test_ou_rejects_unrepresentable_timestamp_gap_cleanly() -> None:
+    huge = 10**400
+    observations = [
+        OUObservation(event_time=0, known_at=0, value=0.1, series_kind="residual"),
+        OUObservation(event_time=huge, known_at=huge, value=0.2, series_kind="residual"),
+        OUObservation(event_time=huge * 2, known_at=huge * 2, value=0.15, series_kind="residual"),
+    ]
+    with pytest.raises(OUProcessError, match="representable as a finite float"):
+        fit_ou_process(observations, config=OUConfig(min_observations=3))

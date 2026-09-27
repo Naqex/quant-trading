@@ -74,6 +74,19 @@ def _sha256(value: Any) -> str:
     return hashlib.sha256(_canonical_json(value).encode("utf-8")).hexdigest()
 
 
+def _time_deltas(observations: tuple[OUObservation, ...]) -> list[float]:
+    deltas: list[float] = []
+    for left, right in pairwise(observations):
+        try:
+            delta = float(right.event_time - left.event_time)
+        except OverflowError as exc:
+            raise OUProcessError("event_time gap must be representable as a finite float") from exc
+        if not math.isfinite(delta) or delta <= 0:
+            raise OUProcessError("event_time gaps must be finite and > 0")
+        deltas.append(delta)
+    return deltas
+
+
 @dataclass(frozen=True)
 class OUObservation:
     """One causal observation from a stationary spread or residual series."""
@@ -412,10 +425,7 @@ def fit_ou_process(
     raw_values = [item.value for item in normalized]
     scale = max(1.0, max(abs(value) for value in raw_values))
     values = [value / scale for value in raw_values]
-    dts = [
-        float(right.event_time - left.event_time)
-        for left, right in pairwise(normalized)
-    ]
+    dts = _time_deltas(normalized)
     min_dt, max_dt = min(dts), max(dts)
     log_min = math.log(model.min_kappa)
     log_max = math.log(model.max_kappa)
@@ -508,7 +518,12 @@ def filter_ou_process(
             conditional_mean = fit.mean_level
             conditional_variance = fit.stationary_variance
         else:
-            dt = float(observation.event_time - previous.event_time)
+            try:
+                dt = float(observation.event_time - previous.event_time)
+            except OverflowError as exc:
+                raise OUProcessError("event_time gap must be representable as a finite float") from exc
+            if not math.isfinite(dt) or dt <= 0:
+                raise OUProcessError("event_time gaps must be finite and > 0")
             phi = math.exp(-fit.kappa * dt) if fit.kappa * dt < 745.0 else 0.0
             conditional_mean = fit.mean_level + phi * (previous.value - fit.mean_level)
             conditional_variance = (
