@@ -425,7 +425,9 @@ def _random_feasible_start(problem: QUBOProblem, rng: np.random.Generator) -> tu
             candidate = tuple((mask >> index) & 1 for index in range(problem.variables))
             if problem.is_feasible(candidate):
                 return candidate
-    raise DiscreteOptimizerError("could not find a feasible binary assignment")
+    raise DiscreteOptimizerError(
+        "could not find a feasible binary assignment within bounded initialization search"
+    )
 
 
 def _neighbor(
@@ -511,7 +513,9 @@ def solve_simulated_annealing(
                 ):
                     best_bits, best_value = current, current_value
     if best_bits is None:
-        raise DiscreteOptimizerError("could not find a feasible binary assignment")
+        raise DiscreteOptimizerError(
+            "could not find a feasible binary assignment within bounded initialization search"
+        )
     return _result(
         problem=problem,
         bits=best_bits,
