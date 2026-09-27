@@ -1,0 +1,33 @@
+{
+  "fixture_type": "synthetic_mechanics_only",
+  "market_edge_claim": false,
+  "research_only": true,
+  "result": {
+    "ate_calibration": 1.206982084609302,
+    "ate_holdout": 1.1966369609449208,
+    "baseline_difference_in_means": 1.2469780219780218,
+    "broker_access": false,
+    "calibration_count": 15,
+    "data_sha256": "ba13e1599822081d2cb8bbb775ed2111ac63b648873703d273cb9c0b95f2b7ba",
+    "effective_sample_size_control": 12.99668680663764,
+    "effective_sample_size_treated": 13.996710611578878,
+    "estimator": "temporal-aipw-train-fit-v1",
+    "execution_capability": false,
+    "holdout_count": 27,
+    "model_sha256": "0e0ead0a7bc04a3bc185cd7493690c4a0d9275044b8e6a895e4a170748dc571b",
+    "overlap_fraction": 1.0,
+    "placebo_difference_in_means": -1.1118131868131866,
+    "provider_access": false,
+    "reason": null,
+    "receipt_sha256": "af83c21d2f82dfc92aaa0745cff406350e5fd475e0daba6f1604dbf8e7c0033a",
+    "schema": "causal-effect-pilot-v1",
+    "split": {
+      "calibration_end": 44,
+      "holdout_end": 71,
+      "train_end": 29
+    },
+    "status": "accepted",
+    "train_count": 29
+  },
+  "schema": "causal-effect-pilot-receipt-v1"
+}
