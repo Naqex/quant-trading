@@ -29,10 +29,12 @@ Các model không dùng smoothing, dữ liệu tương lai hoặc implicit fallb
 
 ## Chưa promote
 
-BOCPD, change-point detector, regime label và mọi signal giao dịch vẫn nằm ngoài
-pilot này. Chúng chỉ được thêm sau khi có fixture dữ liệu, calibration/OOS split,
-drift checks và so sánh với baseline. Primitive state không phải alpha claim và
-không được dùng để suy ra lợi nhuận tương lai.
+BOCPD được giữ thành module/pilot riêng tại
+`docs/research/bayesian-change-point-pilot-r1-2026-09-28.md`, không trộn vào
+primitive state cũ. Regime label và mọi signal giao dịch vẫn nằm ngoài phạm vi;
+BOCPD chỉ được promotion sau fixture dữ liệu, calibration/OOS split, drift
+checks và so sánh với baseline. Primitive state không phải alpha claim và không
+được dùng để suy ra lợi nhuận tương lai.
 
 ## Kiểm chứng
 

@@ -26,6 +26,8 @@ rollback độc lập:
   với calibration/validation/test cutoff theo thời gian.
 - `quant_trading.change_detection`: CUSUM hai phía để chẩn đoán change-point,
   với baseline/threshold explicit và reset policy tái lập.
+- `quant_trading.bayesian_change_point`: BOCPD Normal-Inverse-Gamma causal,
+  predictive Student-t và posterior run-length; safety bound fail-closed.
 - `quant_trading.ou_process`: exact irregular-time Ornstein–Uhlenbeck fit và
   forward-only conditional diagnostics cho stationary spread/residual; raw
   price, near-unit-root fit và provider/broker/execution access đều bị chặn.

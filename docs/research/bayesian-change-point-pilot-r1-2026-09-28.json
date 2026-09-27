@@ -1,0 +1,37 @@
+{
+  "schema": "theory-hypothesis-receipt-v1",
+  "theory_id": "bayesian_online_change_point_nig",
+  "theory_version": "r1",
+  "hypothesis": "A causal Normal-Inverse-Gamma run-length posterior can diagnose distribution shifts without using future observations.",
+  "source_hash": "546a1baf98f0e912788269e8813578475d6721e5ef9d8ac8d7e2370745ec1d30",
+  "data_hash": "c01cc47f322400599ac41326e24beb3a1e648cefea88ca31ba7cff018dd24b86",
+  "model_hash": "d82d0065ddf30dbed69bd34a92919f04198b1e51ef343d7334e0c00855a7b830",
+  "cutoff_timestamp": 4,
+  "known_at": 4,
+  "seed": 0,
+  "assumptions": {
+    "model": "normal-inverse-gamma",
+    "predictive": "student-t",
+    "hazard": 0.25,
+    "max_run_length": null,
+    "execution_capability": false
+  },
+  "metrics": {
+    "observation_count": 4,
+    "change_probabilities": [0.24999999999999994, 0.18482132117398853, 0.6965555927354101, 0.2844957225369564],
+    "map_run_lengths": [1, 2, 0, 1],
+    "predictive_log_score_sum": -12.34005445011152,
+    "result_sha256": "d6650b8de62d93d28be4d456c001e51bf703412a987a694f9ffc47d1b0f33a7c"
+  },
+  "baseline": {
+    "cusum": "diagnostic comparator only",
+    "promotion_status": "PREP_ONLY",
+    "alpha_claim": false
+  },
+  "result_status": "pending",
+  "execution_capability": false,
+  "provider_access": false,
+  "broker_access": false,
+  "rollback_ref": "quant-trading/bayesian-change-point-pilot-r1",
+  "receipt_hash": "ae33d6405fcaf24b4cc581b89d31b19624141f05910f563174cb2e07bdaf7d82"
+}
