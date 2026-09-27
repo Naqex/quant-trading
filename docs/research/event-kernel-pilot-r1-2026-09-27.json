@@ -1,0 +1,44 @@
+{
+  "schema": "event-kernel-pilot-receipt-v1",
+  "date": "2026-09-27",
+  "scope": "offline deterministic event envelope and on-chain DEX fixture adapters",
+  "execution_capability": false,
+  "network_access": false,
+  "provider_access": false,
+  "modules": [
+    "src/quant_trading/event_envelope.py",
+    "src/quant_trading/onchain_events.py",
+    "tests/quant_trading/test_event_kernel.py"
+  ],
+  "contracts": {
+    "event_envelope": "event-envelope-v1",
+    "onchain_event": "onchain-event-v1",
+    "dex_pool_snapshot": "dex-pool-snapshot-v1",
+    "batch": "event-batch-v1"
+  },
+  "guarantees": [
+    "canonical finite JSON event hash, ID, and dedup key",
+    "event_time <= known_at <= available_at",
+    "available_at cutoff and minimum finality filtering",
+    "explicit duplicate, late, and reorg receipts",
+    "reorged records dropped by default",
+    "decimal reserve normalization without binary float loss",
+    "execution capability remains false"
+  ],
+  "validation": {
+    "focused": "uv run pytest -q tests/quant_trading/test_event_kernel.py",
+    "focused_result": "6 passed",
+    "full": "uv run pytest -q",
+    "full_result": "46 passed",
+    "ruff": "uv run ruff check src/quant_trading/event_envelope.py src/quant_trading/onchain_events.py tests/quant_trading/test_event_kernel.py",
+    "ruff_result": "All checks passed",
+    "compileall": "pass",
+    "diff_check": "pass"
+  },
+  "out_of_scope": [
+    "live node/indexer/mempool access",
+    "ABI decoding and chain-specific reorg reconciliation",
+    "DEX pricing or MEV signal claims",
+    "broker, wallet, or order execution"
+  ]
+}
