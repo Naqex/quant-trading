@@ -41,6 +41,8 @@ và luôn giữ `execution_capability=false`. BOCPD/change-point, regime label,
 ABM, game/reflexivity, chaos/SOC/TDA và mọi candidate signal chỉ được thêm sau
 calibration, walk-forward/OOS, cost/stress và baseline evidence tương ứng.
 
+Causal effect/CATE hiện chỉ có research gate tại `docs/research/causal-effect-diagnostic-r1-2026-09-28.md`; chưa có treatment fixture nên chưa đưa estimator vào runtime và chưa có effect claim.
+
 ## Cài đặt
 
 ```powershell
