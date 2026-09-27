@@ -25,6 +25,7 @@ from typing import Any
 
 KALMAN_STATE_SCHEMA = "kalman-1d-state-v1"
 ENTROPY_FEATURE_SCHEMA = "shannon-entropy-feature-v1"
+PERMUTATION_ENTROPY_SCHEMA = "permutation-entropy-feature-v1"
 BAYESIAN_POSTERIOR_SCHEMA = "beta-bernoulli-posterior-v1"
 
 
@@ -544,6 +545,146 @@ def compute_shannon_entropy(
 
 
 @dataclass(frozen=True)
+class PermutationEntropyFeature:
+    """Ordinal-pattern entropy for a causal scalar observation sample.
+
+    Each window is ranked by ``(value, position)`` so equal values have a
+    deterministic, explicitly recorded temporal tie-break.  This makes the
+    statistic reproducible for return series containing repeated zeros while
+    exposing how many windows were affected by ties.  The feature is a
+    complexity/regime diagnostic; it is not a directional signal.
+    """
+
+    pattern_counts: Mapping[str, int]
+    probabilities: Mapping[str, float]
+    sample_count: int
+    order: int
+    delay: int
+    entropy_nats: float
+    normalized_entropy: float
+    tie_window_count: int
+    cutoff_timestamp: int | None
+    observation_sha256: str
+    schema: str = PERMUTATION_ENTROPY_SCHEMA
+    execution_capability: bool = False
+
+    def __post_init__(self) -> None:
+        if self.schema != PERMUTATION_ENTROPY_SCHEMA:
+            raise StatePrimitiveError(f"unsupported permutation entropy schema: {self.schema!r}")
+        if self.execution_capability is not False:
+            raise StatePrimitiveError("state primitives cannot grant execution capability")
+        _strict_int(self.sample_count, "sample_count", minimum=1)
+        _strict_int(self.order, "order", minimum=2)
+        _strict_int(self.delay, "delay", minimum=1)
+        _strict_int(self.tie_window_count, "tie_window_count", minimum=0)
+        if self.tie_window_count > self.sample_count:
+            raise StatePrimitiveError("tie_window_count cannot exceed sample_count")
+        if self.cutoff_timestamp is not None:
+            _strict_int(self.cutoff_timestamp, "cutoff_timestamp")
+        if not isinstance(self.observation_sha256, str) or len(self.observation_sha256) != 64:
+            raise StatePrimitiveError("observation_sha256 must be a SHA-256 hex digest")
+        if not math.isfinite(self.entropy_nats) or self.entropy_nats < 0:
+            raise StatePrimitiveError("entropy_nats must be finite and >= 0")
+        if not math.isfinite(self.normalized_entropy) or not 0 <= self.normalized_entropy <= 1:
+            raise StatePrimitiveError("normalized_entropy must be finite and in [0, 1]")
+        if not isinstance(self.pattern_counts, Mapping) or not isinstance(self.probabilities, Mapping):
+            raise StatePrimitiveError("pattern_counts and probabilities must be mappings")
+        if set(self.pattern_counts) != set(self.probabilities):
+            raise StatePrimitiveError("pattern_counts and probabilities must have identical patterns")
+        if sum(self.pattern_counts.values()) != self.sample_count:
+            raise StatePrimitiveError("pattern_counts must sum to sample_count")
+        if any(type(count) is not int or count < 1 for count in self.pattern_counts.values()):
+            raise StatePrimitiveError("pattern counts must be positive integers")
+        if any(
+            not isinstance(probability, (int, float))
+            or not math.isfinite(float(probability))
+            or not 0 <= float(probability) <= 1
+            for probability in self.probabilities.values()
+        ):
+            raise StatePrimitiveError("pattern probabilities must be finite and in [0, 1]")
+        if not math.isclose(sum(self.probabilities.values()), 1.0, rel_tol=1e-12, abs_tol=1e-12):
+            raise StatePrimitiveError("pattern probabilities must sum to one")
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "schema": self.schema,
+            "execution_capability": self.execution_capability,
+            "cutoff_timestamp": self.cutoff_timestamp,
+            "sample_count": self.sample_count,
+            "order": self.order,
+            "delay": self.delay,
+            "pattern_counts": dict(self.pattern_counts),
+            "probabilities": dict(self.probabilities),
+            "entropy_nats": self.entropy_nats,
+            "normalized_entropy": self.normalized_entropy,
+            "tie_window_count": self.tie_window_count,
+            "observation_sha256": self.observation_sha256,
+        }
+
+    def canonical_sha256(self) -> str:
+        return _sha256(self.as_dict())
+
+
+def compute_permutation_entropy(
+    observations: Iterable[CausalObservation | Mapping[str, Any]],
+    *,
+    order: int = 3,
+    delay: int = 1,
+    cutoff_timestamp: int | None = None,
+) -> PermutationEntropyFeature:
+    """Compute causal ordinal-pattern entropy from a scalar sample.
+
+    Windows are built in ``known_at`` order and use ``delay`` observations
+    between adjacent ordinal values.  Ties use the earlier value in the
+    window as a stable tie-break and are counted in ``tie_window_count``.
+    ``order`` is bounded to eight to keep the finite pattern space explicit.
+    """
+
+    if type(order) is not int or not 2 <= order <= 8:
+        raise StatePrimitiveError("order must be an integer between 2 and 8")
+    if type(delay) is not int or delay < 1:
+        raise StatePrimitiveError("delay must be an integer >= 1")
+    normalized = _normalize_observations(observations, cutoff_timestamp=cutoff_timestamp)
+    window_length = 1 + (order - 1) * delay
+    if len(normalized) < window_length:
+        raise StatePrimitiveError(
+            f"permutation entropy requires at least {window_length} observations for order/delay"
+        )
+
+    pattern_counts: Counter[str] = Counter()
+    tie_window_count = 0
+    for start in range(len(normalized) - window_length + 1):
+        window = tuple(normalized[start + offset * delay].value for offset in range(order))
+        if len(set(window)) < len(window):
+            tie_window_count += 1
+        ranked = tuple(index for index, _ in sorted(enumerate(window), key=lambda item: (item[1], item[0])))
+        pattern = ",".join(str(index) for index in ranked)
+        pattern_counts[pattern] += 1
+
+    sample_count = sum(pattern_counts.values())
+    probabilities = {
+        pattern: count / sample_count for pattern, count in sorted(pattern_counts.items())
+    }
+    entropy = -sum(probability * math.log(probability) for probability in probabilities.values())
+    maximum_entropy = math.log(math.factorial(order))
+    normalized_entropy = min(1.0, max(0.0, entropy / maximum_entropy))
+    if not all(math.isfinite(value) for value in (entropy, normalized_entropy)):
+        raise StatePrimitiveError("permutation entropy became non-finite")
+    return PermutationEntropyFeature(
+        pattern_counts=MappingProxyType(dict(sorted(pattern_counts.items()))),
+        probabilities=MappingProxyType(probabilities),
+        sample_count=sample_count,
+        order=order,
+        delay=delay,
+        entropy_nats=entropy,
+        normalized_entropy=normalized_entropy,
+        tie_window_count=tie_window_count,
+        cutoff_timestamp=cutoff_timestamp,
+        observation_sha256=_sha256([item.as_dict() for item in normalized]),
+    )
+
+
+@dataclass(frozen=True)
 class BetaPrior:
     alpha: float = 1.0
     beta: float = 1.0
@@ -672,6 +813,7 @@ __all__ = [
     "BAYESIAN_POSTERIOR_SCHEMA",
     "ENTROPY_FEATURE_SCHEMA",
     "KALMAN_STATE_SCHEMA",
+    "PERMUTATION_ENTROPY_SCHEMA",
     "BayesianEstimate",
     "BayesianPosteriorResult",
     "BetaPrior",
@@ -682,7 +824,9 @@ __all__ = [
     "Kalman1DConfig",
     "Kalman1DResult",
     "KalmanEstimate",
+    "PermutationEntropyFeature",
     "StatePrimitiveError",
+    "compute_permutation_entropy",
     "compute_shannon_entropy",
     "run_kalman_1d",
     "update_beta_bernoulli",

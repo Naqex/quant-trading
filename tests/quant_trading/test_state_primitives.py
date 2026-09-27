@@ -9,6 +9,7 @@ from quant_trading.state_primitives import (
     CausalObservation,
     Kalman1DConfig,
     StatePrimitiveError,
+    compute_permutation_entropy,
     compute_shannon_entropy,
     run_kalman_1d,
     update_beta_bernoulli,
@@ -71,6 +72,41 @@ def test_entropy_rejects_empty_and_future_observations() -> None:
             [CategoricalObservation(event_time=1, known_at=3, category="up")],
             cutoff_timestamp=2,
         )
+
+
+def test_permutation_entropy_is_causal_deterministic_and_bounded() -> None:
+    observations = [
+        CausalObservation(event_time=index, known_at=index + 1, value=value)
+        for index, value in enumerate((1.0, 2.0, 3.0, 4.0, 5.0), start=1)
+    ]
+    feature = compute_permutation_entropy(reversed(observations), order=3, cutoff_timestamp=6)
+
+    assert feature.execution_capability is False
+    assert feature.pattern_counts == {"0,1,2": 3}
+    assert feature.entropy_nats == pytest.approx(0.0)
+    assert feature.normalized_entropy == pytest.approx(0.0)
+    assert feature.tie_window_count == 0
+    assert feature.canonical_sha256() == compute_permutation_entropy(
+        observations, order=3, cutoff_timestamp=6
+    ).canonical_sha256()
+
+
+def test_permutation_entropy_records_ties_and_rejects_noncausal_windows() -> None:
+    observations = [
+        CausalObservation(event_time=index, known_at=index, value=value)
+        for index, value in enumerate((1.0, 1.0, 2.0, 2.0), start=1)
+    ]
+    feature = compute_permutation_entropy(observations, order=3)
+
+    assert feature.tie_window_count == 2
+    assert feature.sample_count == 2
+    assert 0.0 <= feature.normalized_entropy <= 1.0
+    with pytest.raises(StatePrimitiveError, match="exceeds research cutoff"):
+        compute_permutation_entropy(observations, cutoff_timestamp=3)
+    with pytest.raises(StatePrimitiveError, match="requires at least"):
+        compute_permutation_entropy(observations[:2], order=3)
+    with pytest.raises(StatePrimitiveError, match="between 2 and 8"):
+        compute_permutation_entropy(observations, order=1)
 
 
 def test_beta_bernoulli_updates_are_causal_and_calibrated() -> None:

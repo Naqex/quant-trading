@@ -20,7 +20,8 @@ Các pilot P0 được giữ tách khỏi backtest/execution để có thể tá
 rollback độc lập:
 
 - `quant_trading.state_primitives`: Kalman forward-only, Shannon entropy có
-  Miller–Madow explicit và Beta–Bernoulli Bayesian update.
+  Miller–Madow explicit, permutation entropy ordinal-pattern và Beta–Bernoulli
+  Bayesian update.
 - `quant_trading.conformal`: split-conformal interval cho point forecast đã có,
   với calibration/validation/test cutoff theo thời gian.
 - `quant_trading.change_detection`: CUSUM hai phía để chẩn đoán change-point,
