@@ -11,8 +11,10 @@ execution authority.
 The classical reference is Page's cumulative-sum procedure for sequential
 analysis ([Page, 1954, *Biometrika*](https://doi.org/10.1093/biomet/41.1-2.100)).
 This pilot deliberately keeps the implementation narrower than a production
-sequential test: no estimated baseline, no p-value claim, no automatic
-calibration, and no Bayesian online change-point model yet.
+sequential test: no estimated baseline, no p-value claim and no automatic
+calibration. A separate Bayesian online change-point pilot now exists at
+`bayesian-change-point-pilot-r1-2026-09-28.md`; it does not change this CUSUM
+contract or promote either detector to a regime label.
 
 ## Contract
 
