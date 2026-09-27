@@ -436,9 +436,14 @@ class FeatureSnapshot:
         raw_observations = payload.get("observations")
         if not isinstance(raw_observations, list):
             raise FeatureRegistryError("feature snapshot observations must be a list")
+        try:
+            registry_payload = payload["registry"]
+            cutoff_timestamp = payload["cutoff_timestamp_utc"]
+        except KeyError as exc:
+            raise FeatureRegistryError(f"feature snapshot is missing {exc.args[0]}") from exc
         snapshot = cls(
-            registry=FeatureRegistry.from_mapping(payload["registry"]),
-            cutoff_timestamp_utc=payload["cutoff_timestamp_utc"],
+            registry=FeatureRegistry.from_mapping(registry_payload),
+            cutoff_timestamp_utc=cutoff_timestamp,
             observations=tuple(FeatureObservation.from_mapping(item) for item in raw_observations),
             schema=payload.get("schema", FEATURE_SNAPSHOT_SCHEMA),
             execution_capability=payload.get("execution_capability", False),
