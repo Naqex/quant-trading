@@ -9,6 +9,8 @@ from urllib.request import Request, urlopen
 
 import pandas as pd
 
+from quant_lab.provenance import validate_candles
+
 BINANCE_KLINES_URL = "https://api.binance.com/api/v3/klines"
 KLINE_COLUMNS = [
     "open_time",
@@ -75,10 +77,13 @@ def download_binance_klines(
     frame["trade_count"] = frame["trade_count"].astype(int)
     frame["open_time"] = pd.to_datetime(frame["open_time"], unit="ms", utc=True)
     frame["close_time"] = pd.to_datetime(frame["close_time"], unit="ms", utc=True)
-    return frame.drop_duplicates("open_time").sort_values("open_time").reset_index(drop=True)
+    frame = frame.sort_values("open_time").reset_index(drop=True)
+    validate_candles(frame)
+    return frame
 
 
 def save_candles(frame: pd.DataFrame, path: Path) -> Path:
+    validate_candles(frame)
     path.parent.mkdir(parents=True, exist_ok=True)
     frame.to_csv(path, index=False)
     return path
@@ -86,4 +91,5 @@ def save_candles(frame: pd.DataFrame, path: Path) -> Path:
 
 def load_candles(path: Path) -> pd.DataFrame:
     frame = pd.read_csv(path, parse_dates=["open_time", "close_time"])
-    return frame.sort_values("open_time").drop_duplicates("open_time").reset_index(drop=True)
+    validate_candles(frame)
+    return frame.reset_index(drop=True)
