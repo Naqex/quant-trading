@@ -1,0 +1,19 @@
+{
+  "schema": "chart-feature-contract-receipt-v1",
+  "status": "PREP_ONLY",
+  "scope": "offline contract validation",
+  "contract_schema": "strategy-research-contract-v1",
+  "event_schema": "chart-event-v1",
+  "holdout_access": false,
+  "execution_capability": false,
+  "provider_access": false,
+  "broker_access": false,
+  "focused_test": "tests/test_chart_features.py",
+  "focused_test_count": 9,
+  "full_quant_test_command": "uv run pytest -q",
+  "full_quant_test_count": 33,
+  "compileall": "pass",
+  "ruff": "pass",
+  "edge_claim": false,
+  "production_claim": false
+}
