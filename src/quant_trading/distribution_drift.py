@@ -109,6 +109,25 @@ class PSIBin:
     current_probability: float
     contribution: float
 
+    def __post_init__(self) -> None:
+        lower = _finite(self.lower, "lower")
+        upper = _finite(self.upper, "upper")
+        if upper <= lower:
+            raise DistributionDriftError("PSI bin upper must be greater than lower")
+        object.__setattr__(self, "lower", lower)
+        object.__setattr__(self, "upper", upper)
+        _strict_int(self.reference_count, "reference_count", minimum=0)
+        _strict_int(self.current_count, "current_count", minimum=0)
+        for name in ("reference_probability", "current_probability"):
+            probability = _finite(getattr(self, name), name)
+            if not 0.0 <= probability <= 1.0:
+                raise DistributionDriftError(f"{name} must be in [0, 1]")
+            object.__setattr__(self, name, probability)
+        contribution = _finite(self.contribution, "contribution")
+        if contribution < 0.0:
+            raise DistributionDriftError("contribution must be >= 0")
+        object.__setattr__(self, "contribution", contribution)
+
     def as_dict(self) -> dict[str, Any]:
         return {
             "lower": self.lower,
@@ -146,6 +165,8 @@ class PSIResult:
             raise DistributionDriftError("config must be PSIConfig")
         if not isinstance(self.bins, tuple) or len(self.bins) != self.config.bin_count:
             raise DistributionDriftError("bins must match config.bin_edges")
+        if any(not isinstance(item, PSIBin) for item in self.bins):
+            raise DistributionDriftError("bins must contain PSIBin values")
         _strict_int(self.reference_sample_count, "reference_sample_count", minimum=1)
         _strict_int(self.current_sample_count, "current_sample_count", minimum=1)
         if not math.isfinite(self.psi) or self.psi < 0.0:
@@ -154,6 +175,22 @@ class PSIResult:
             raise DistributionDriftError("drift_flag must be a boolean")
         if self.drift_flag != (self.psi >= self.config.alert_threshold):
             raise DistributionDriftError("drift_flag does not match psi and alert_threshold")
+        if sum(item.reference_count for item in self.bins) != self.reference_sample_count:
+            raise DistributionDriftError("reference bin counts do not match sample count")
+        if sum(item.current_count for item in self.bins) != self.current_sample_count:
+            raise DistributionDriftError("current bin counts do not match sample count")
+        if not math.isclose(
+            sum(item.reference_probability for item in self.bins), 1.0, rel_tol=1e-12, abs_tol=1e-12
+        ):
+            raise DistributionDriftError("reference probabilities must sum to one")
+        if not math.isclose(
+            sum(item.current_probability for item in self.bins), 1.0, rel_tol=1e-12, abs_tol=1e-12
+        ):
+            raise DistributionDriftError("current probabilities must sum to one")
+        if not math.isclose(
+            sum(item.contribution for item in self.bins), self.psi, rel_tol=1e-12, abs_tol=1e-12
+        ):
+            raise DistributionDriftError("bin contributions do not sum to psi")
         if self.cutoff_timestamp is not None:
             _strict_int(self.cutoff_timestamp, "cutoff_timestamp")
         for name in ("reference_sha256", "current_sha256"):
