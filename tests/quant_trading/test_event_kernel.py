@@ -165,3 +165,6 @@ def test_dex_snapshot_normalizes_numeric_fixture_without_float_loss() -> None:
         DexPoolSnapshot.from_mapping(
             {key: value for key, value in dex_fixture().items() if key != "pool_address"}
         )
+
+    with pytest.raises(EventEnvelopeError, match="instrument_id"):
+        DexPoolSnapshot.from_mapping({**dex_fixture(), "instrument_id": "   "})

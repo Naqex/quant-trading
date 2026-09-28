@@ -248,7 +248,10 @@ class DexPoolSnapshot:
         reserve1 = _decimal_text(self.reserve1, "reserve1")
         fee_bps = None if self.fee_bps is None else _decimal_text(self.fee_bps, "fee_bps")
         liquidity = None if self.liquidity is None else _decimal_text(self.liquidity, "liquidity")
-        instrument = self.instrument_id or f"{token0}/{token1}"
+        # An omitted instrument uses the canonical token pair, while an
+        # explicitly supplied blank value is malformed and must not silently
+        # change event identity.
+        instrument = f"{token0}/{token1}" if self.instrument_id is None else self.instrument_id
         instrument = _text(instrument, "instrument_id", maximum=512)
         if self.sequence is not None:
             _int(self.sequence, "sequence")
