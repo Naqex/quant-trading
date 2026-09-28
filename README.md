@@ -49,6 +49,9 @@ rollback độc lập:
 - `quant_trading.feature_drift`: nối `FeatureSnapshot` vào PSI/OOD với registry
   hash, snapshot hashes và cutoff; chỉ nhận hàng `accepted`, dùng bin đã chốt
   trước và trả receipt `PREP_ONLY`, không biến drift thành regime hay signal.
+- `quant_trading.feature_governance`: giữ nguyên feature OOD lineage khi nối
+  PSI vào champion/challenger review; mismatch PSI, fixture, sample hoặc cutoff
+  đều fail-closed và quyết định chỉ là recommendation offline.
 
 Các primitive này chỉ nhận fixture đã capture, không gọi provider/broker/network
 và luôn giữ `execution_capability=false`. BOCPD/change-point, regime label,

@@ -1,0 +1,27 @@
+{
+  "schema": "feature-governance-review-pilot-v1",
+  "status": "PREP_ONLY",
+  "date": "2026-09-28",
+  "module": "quant_trading.feature_governance",
+  "function": "review_feature_drift",
+  "reuses": [
+    "quant_trading.feature_drift.FeaturePSIResult",
+    "quant_trading.model_governance.evaluate_challenger"
+  ],
+  "guards": [
+    "candidate and champion use identical feature PSI hash",
+    "fixture and cutoff alignment",
+    "sample count alignment",
+    "drift routes to review-only governance action",
+    "execution_capability=false",
+    "provider_access=false",
+    "broker_access=false"
+  ],
+  "validation_command": "uv run pytest -q tests/quant_trading/test_feature_governance.py",
+  "limitations": [
+    "Synthetic/local contract tests only",
+    "No model training, scheduler, persistence, or live adapter",
+    "No edge, alpha, profitability, or execution claim",
+    "Promotion still requires chronological OOS, cost, stress and holdout evidence"
+  ]
+}
