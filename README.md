@@ -52,6 +52,9 @@ rollback độc lập:
 - `quant_trading.feature_governance`: giữ nguyên feature OOD lineage khi nối
   PSI vào champion/challenger review; mismatch PSI, fixture, sample hoặc cutoff
   đều fail-closed và quyết định chỉ là recommendation offline.
+- `quant_trading.walk_forward`: expanding chronological OOS folds với prefix
+  replay point-in-time và cost stress theo multiplier; receipt canonical,
+  boundary entry được giữ đúng và mọi capability vẫn `false`.
 
 Các primitive này chỉ nhận fixture đã capture, không gọi provider/broker/network
 và luôn giữ `execution_capability=false`. BOCPD/change-point, regime label,
