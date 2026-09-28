@@ -1,0 +1,26 @@
+{
+  "schema": "cost-monte-carlo-pilot-v1",
+  "date": "2026-09-28",
+  "module": "quant_trading.cost_monte_carlo",
+  "function": "run_cost_monte_carlo",
+  "status": "PREP_ONLY",
+  "capabilities": {
+    "execution_capability": false,
+    "provider_access": false,
+    "broker_access": false
+  },
+  "contract": [
+    "fixed close and causal signal fixture",
+    "baseline plus bounded deterministic fee/slippage draws",
+    "SHA-256-derived deterministic multipliers",
+    "all draw costs below 100 percent per turnover",
+    "canonical input and receipt hashes",
+    "metric distribution only; no promotion decision"
+  ],
+  "validation_command": "uv run pytest -q tests/quant_trading/test_cost_monte_carlo.py",
+  "limitations": [
+    "does not model spread, latency, partial fills, market impact or regime change",
+    "does not independently prove causal signal timing",
+    "does not claim edge, profitability, paper authority or live authority"
+  ]
+}

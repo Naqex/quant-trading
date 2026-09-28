@@ -63,6 +63,10 @@ rollback độc lập:
   stress trên một neighbourhood tham số đã đăng ký trước, rồi báo dispersion
   của metric giữa các variant. Đây là stability evidence; module không chọn
   winner, không tự đổi tham số và không mở execution capability.
+- `quant_trading.cost_monte_carlo`: perturbation deterministic của fee/slippage
+  trên một signal fixture cố định; lưu seed, draw multipliers, input hash và
+  phân phối metric để đo độ nhạy chi phí. Đây là diagnostic `PREP_ONLY`, không
+  mô phỏng partial fill/latency/market impact và không mở execution capability.
 
 Các primitive này chỉ nhận fixture đã capture, không gọi provider/broker/network
 và luôn giữ `execution_capability=false`. BOCPD/change-point, regime label,
