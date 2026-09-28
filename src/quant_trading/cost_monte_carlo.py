@@ -256,6 +256,8 @@ class CostMonteCarloReceipt:
         draws = tuple(self.draws)
         if len(draws) != self.config.draws:
             raise CostMonteCarloError("draw count must match config.draws")
+        if any(not isinstance(draw, CostMonteCarloDraw) for draw in draws):
+            raise CostMonteCarloError("draws must contain CostMonteCarloDraw values")
         if tuple(draw.draw_index for draw in draws) != tuple(range(self.config.draws)):
             raise CostMonteCarloError("draw indexes must be contiguous and sorted")
         baseline = dict(self.baseline_metrics)
