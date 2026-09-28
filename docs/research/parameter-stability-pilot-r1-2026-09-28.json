@@ -1,0 +1,30 @@
+{
+  "schema": "parameter-stability-pilot-v1",
+  "status": "PREP_ONLY",
+  "date": "2026-09-28",
+  "module": "quant_trading.parameter_stability",
+  "function": "run_parameter_stability",
+  "reuses": [
+    "quant_trading.walk_forward.run_walk_forward_stress",
+    "quant_lab.backtest.run_backtest"
+  ],
+  "guards": [
+    "at least two pre-registered named variants",
+    "deterministic variant ordering",
+    "same input hash and walk-forward config for every variant",
+    "causal prefix replay and next-bar spot accounting",
+    "baseline and configured adverse cost stress for every variant",
+    "canonical nested receipts and SHA-256",
+    "execution_capability=false",
+    "provider_access=false",
+    "broker_access=false"
+  ],
+  "validation_command": "uv run pytest -q tests/quant_trading/test_parameter_stability.py tests/quant_trading/test_walk_forward.py",
+  "limitations": [
+    "Synthetic/local contract tests only",
+    "Does not select a winner or fit parameters",
+    "No edge, alpha, profitability or execution claim",
+    "No spread, latency, partial fill, impact or regime-shift simulation",
+    "Promotion still requires independent holdout, drift/OOD, paper soak and human review"
+  ]
+}

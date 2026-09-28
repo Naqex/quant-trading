@@ -59,6 +59,10 @@ rollback độc lập:
   kiểm tra schema, thời gian, số hữu hạn, tính nhất quán nến, fingerprint và
   gap budget tường minh. Missing candle mặc định là warning vì fixture crypto
   có thể có gap; chỉ policy có `max_gap_count` mới biến gap thành reject.
+- `quant_trading.parameter_stability`: chạy cùng causal walk-forward/cost
+  stress trên một neighbourhood tham số đã đăng ký trước, rồi báo dispersion
+  của metric giữa các variant. Đây là stability evidence; module không chọn
+  winner, không tự đổi tham số và không mở execution capability.
 
 Các primitive này chỉ nhận fixture đã capture, không gọi provider/broker/network
 và luôn giữ `execution_capability=false`. BOCPD/change-point, regime label,
