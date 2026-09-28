@@ -1,0 +1,31 @@
+{
+  "schema": "walk-forward-cost-stress-pilot-v1",
+  "status": "PREP_ONLY",
+  "date": "2026-09-28",
+  "module": "quant_trading.walk_forward",
+  "function": "run_walk_forward_stress",
+  "reuses": [
+    "quant_lab.backtest.run_backtest",
+    "quant_lab.metrics.performance_metrics"
+  ],
+  "guards": [
+    "expanding chronological train/test folds",
+    "point-in-time prefix replay prevents future OOS rows reaching the signal factory",
+    "next-bar spot accounting with fee and slippage",
+    "baseline 1.0 plus finite positive unique cost multipliers",
+    "stress costs remain below 100 percent per turnover",
+    "canonical input and receipt SHA-256",
+    "execution_capability=false",
+    "provider_access=false",
+    "broker_access=false"
+  ],
+  "validation_command": "uv run pytest -q tests/quant_trading/test_walk_forward.py",
+  "limitations": [
+    "Synthetic/local contract tests only",
+    "No parameter fitting, model selection or optimizer",
+    "Cost stress scales fee and slippage only",
+    "No spread, latency, partial fill, market impact or missing-data simulation",
+    "No edge, alpha, profitability or execution claim",
+    "Promotion still requires independent OOS/holdout and governance evidence"
+  ]
+}
