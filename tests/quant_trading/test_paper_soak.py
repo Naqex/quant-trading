@@ -122,6 +122,12 @@ def test_accepted_receipt_requires_full_window_review_and_restart_proof() -> Non
         PaperSoakReceipt(
             daily_reconciliation=tuple(_day(index) for index in range(1, 30)),
             restart_checks=(_restart(),),
+            run_id="paper-run-1",
+            attempt_no=1,
+            fence_token="fence-1",
+            config_sha256=HASH,
+            strategy_sha256=HASH,
+            risk_budget_sha256=HASH,
             owner_reviewed=True,
             status="ACCEPTED",
         )
@@ -133,6 +139,12 @@ def test_accepted_rejects_unhealthy_days_and_tampered_receipt() -> None:
         PaperSoakReceipt(
             daily_reconciliation=days,
             restart_checks=(_restart(),),
+            run_id="paper-run-1",
+            attempt_no=1,
+            fence_token="fence-1",
+            config_sha256=HASH,
+            strategy_sha256=HASH,
+            risk_budget_sha256=HASH,
             owner_reviewed=True,
             status="ACCEPTED",
         )
@@ -140,6 +152,12 @@ def test_accepted_rejects_unhealthy_days_and_tampered_receipt() -> None:
     accepted = PaperSoakReceipt(
         daily_reconciliation=tuple(_day(index) for index in range(1, 31)),
         restart_checks=(_restart(),),
+        run_id="paper-run-1",
+        attempt_no=1,
+        fence_token="fence-1",
+        config_sha256=HASH,
+        strategy_sha256=HASH,
+        risk_budget_sha256=HASH,
         owner_reviewed=True,
         status="ACCEPTED",
     )

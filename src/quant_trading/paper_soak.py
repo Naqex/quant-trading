@@ -310,6 +310,10 @@ class PaperSoakReceipt:
         if self.status == "ACCEPTED":
             if len(days) < MINIMUM_SOAK_DAYS or not self.owner_reviewed:
                 raise PaperSoakError("ACCEPTED evidence requires 30 days and explicit owner review")
+            if self.run_id is None or self.attempt_no is None or self.fence_token is None:
+                raise PaperSoakError("ACCEPTED evidence requires a complete run identity")
+            if any(value is None for value in identity_hashes):
+                raise PaperSoakError("ACCEPTED evidence requires config, strategy and risk hashes")
             if any(
                 day.reconciliation_status != "reconciled" or day.health_status != "healthy"
                 for day in days
