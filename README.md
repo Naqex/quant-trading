@@ -55,6 +55,10 @@ rollback độc lập:
 - `quant_trading.walk_forward`: expanding chronological OOS folds với prefix
   replay point-in-time và cost stress theo multiplier; receipt canonical,
   boundary entry được giữ đúng và mọi capability vẫn `false`.
+- `quant_trading.data_quality`: OHLCV preflight fail-closed trước walk-forward;
+  kiểm tra schema, thời gian, số hữu hạn, tính nhất quán nến, fingerprint và
+  gap budget tường minh. Missing candle mặc định là warning vì fixture crypto
+  có thể có gap; chỉ policy có `max_gap_count` mới biến gap thành reject.
 
 Các primitive này chỉ nhận fixture đã capture, không gọi provider/broker/network
 và luôn giữ `execution_capability=false`. BOCPD/change-point, regime label,

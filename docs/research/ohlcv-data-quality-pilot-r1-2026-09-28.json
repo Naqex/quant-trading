@@ -1,0 +1,23 @@
+{
+  "schema": "ohlcv-quality-receipt-v1",
+  "status": "PREP_ONLY",
+  "quality_status": "accepted",
+  "rows": 4,
+  "start_utc": "2026-01-01T00:00:00+00:00",
+  "end_utc": "2026-01-01T03:00:00+00:00",
+  "data_sha256": "790d95e10c2c9012cdbc63b0c4a374f0be33b9878b0d578d7934e5ea31c625ae",
+  "observed_interval_seconds": 3600.0,
+  "min_interval_seconds": 3600.0,
+  "max_interval_seconds": 3600.0,
+  "gap_count": 0,
+  "policy": {
+    "expected_interval_seconds": 3600,
+    "max_gap_count": 0
+  },
+  "warnings": [],
+  "errors": [],
+  "execution_capability": false,
+  "provider_access": false,
+  "broker_access": false,
+  "receipt_sha256": "42aaeb9dde1f8c79023771d502047b95108e352034e47812e73da9b9a21475ba"
+}
