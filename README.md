@@ -46,6 +46,9 @@ rollback độc lập:
   pin source/rule/data hash, dependency lineage và explicit event/known/available
   timestamps. Snapshot chỉ nhận dữ liệu đã khả dụng trước cutoff, loại duplicate,
   stale/invalidated rows và luôn giữ execution/provider/broker capability false.
+- `quant_trading.feature_drift`: nối `FeatureSnapshot` vào PSI/OOD với registry
+  hash, snapshot hashes và cutoff; chỉ nhận hàng `accepted`, dùng bin đã chốt
+  trước và trả receipt `PREP_ONLY`, không biến drift thành regime hay signal.
 
 Các primitive này chỉ nhận fixture đã capture, không gọi provider/broker/network
 và luôn giữ `execution_capability=false`. BOCPD/change-point, regime label,

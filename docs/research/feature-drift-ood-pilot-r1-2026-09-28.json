@@ -1,0 +1,29 @@
+{
+  "schema": "feature-population-stability-index-pilot-v1",
+  "status": "PREP_ONLY",
+  "date": "2026-09-28",
+  "module": "quant_trading.feature_drift",
+  "function": "compute_feature_snapshot_psi",
+  "scope": "offline-point-in-time-feature-ood",
+  "reuses": [
+    "quant_trading.feature_registry.FeatureSnapshot",
+    "quant_trading.distribution_drift.compute_psi"
+  ],
+  "guards": [
+    "same registry hash",
+    "accepted quality only",
+    "explicit feature id",
+    "cutoff bounded",
+    "fixed bins",
+    "execution_capability=false",
+    "provider_access=false",
+    "broker_access=false"
+  ],
+  "validation_command": "uv run pytest -q tests/quant_trading/test_feature_drift.py",
+  "limitations": [
+    "Synthetic/local contract tests only",
+    "No edge, regime, alpha, or execution claim",
+    "PSI threshold still needs pre-registered OOS and stress evidence",
+    "No provider, broker, RPC, wallet, or database access"
+  ]
+}
