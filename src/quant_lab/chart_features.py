@@ -368,6 +368,11 @@ class StrategyResearchContract:
     walk_forward: WalkForwardPlan
     execution_timing: str = "closed_bar_next_open"
     execution_capability: bool = False
+    # A replay cutoff is part of the contract when the upstream chart engine
+    # captured a bounded historical view.  Keeping it here (instead of only
+    # in a caller's metadata) makes the event boundary survive serialization
+    # and canonical hashing.
+    replay_cutoff_utc: int | None = None
 
     def __post_init__(self) -> None:
         _non_empty_text(self.strategy_id, "strategy_id", maximum=128)
@@ -396,8 +401,11 @@ class StrategyResearchContract:
             raise ChartResearchContractError("execution_timing must be closed_bar_next_open")
         if self.execution_capability is not False:
             raise ChartResearchContractError("chart feature contracts cannot grant execution capability")
+        if self.replay_cutoff_utc is not None:
+            _strict_int(self.replay_cutoff_utc, "replay_cutoff_utc", minimum=0)
         events = validate_chart_events(
             self.events,
+            cutoff_timestamp=self.replay_cutoff_utc,
             holdout_from_utc=self.walk_forward.holdout_from_utc,
         )
         if any(
@@ -427,6 +435,7 @@ class StrategyResearchContract:
                 walk_forward=WalkForwardPlan.from_mapping(payload["walk_forward"]),
                 execution_timing=payload.get("execution_timing", "closed_bar_next_open"),
                 execution_capability=payload.get("execution_capability", False),
+                replay_cutoff_utc=payload.get("replay_cutoff_utc"),
             )
         except KeyError as exc:
             raise ChartResearchContractError(f"strategy research contract is missing {exc.args[0]}") from exc
@@ -443,6 +452,7 @@ class StrategyResearchContract:
             "data_provenance": dict(self.data_provenance),
             "execution_timing": self.execution_timing,
             "execution_capability": self.execution_capability,
+            "replay_cutoff_utc": self.replay_cutoff_utc,
             "events": [event.as_dict() for event in self.events],
             "costs": self.costs.as_dict(),
             "walk_forward": self.walk_forward.as_dict(),
@@ -465,10 +475,15 @@ def build_strategy_research_contract(
     events: Iterable[ChartEvent | Mapping[str, Any]],
     costs: CostModel,
     walk_forward: WalkForwardPlan,
+    replay_cutoff_utc: int | None = None,
 ) -> StrategyResearchContract:
     """Build one validated, provider-free chart feature research packet."""
 
-    normalized_events = validate_chart_events(events, holdout_from_utc=walk_forward.holdout_from_utc)
+    normalized_events = validate_chart_events(
+        events,
+        cutoff_timestamp=replay_cutoff_utc,
+        holdout_from_utc=walk_forward.holdout_from_utc,
+    )
     return StrategyResearchContract(
         strategy_id=strategy_id,
         strategy_version=strategy_version,
@@ -480,6 +495,7 @@ def build_strategy_research_contract(
         events=normalized_events,
         costs=costs,
         walk_forward=walk_forward,
+        replay_cutoff_utc=replay_cutoff_utc,
     )
 
 

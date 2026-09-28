@@ -24,7 +24,10 @@ Quant Lab's spot backtest, and TradingAgents' decision-quality backtest.
 
 1. Event IDs are unique and events are sorted by `(known_at, event_id)`.
 2. `known_at` never precedes the event anchor and cannot cross a replay cutoff
-   or metadata-only holdout boundary.
+   or metadata-only holdout boundary. When the upstream replay is bounded,
+   `StrategyResearchContract.replay_cutoff_utc` carries that cutoff into the
+   serialized payload and canonical hash, so a consumer cannot silently widen
+   the event window by changing out-of-band metadata.
 3. Walk-forward folds are half-open and ordered as
    `train → purge → embargo → OOS`; OOS may not reach locked holdout data.
 4. Fee and slippage are finite, non-negative basis-point assumptions whose

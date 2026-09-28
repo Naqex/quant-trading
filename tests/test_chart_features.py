@@ -81,6 +81,41 @@ def test_future_and_holdout_events_fail_closed():
         validate_chart_events([event(known_at=120)], holdout_from_utc=120)
 
 
+def test_strategy_contract_pins_replay_cutoff_and_roundtrips() -> None:
+    contract = build_strategy_research_contract(
+        strategy_id="smc-cutoff",
+        strategy_version="1",
+        instrument_id="BTCUSDT",
+        timeframe_seconds=60,
+        feature_rule_version="smc-v1",
+        data_sha256=DATA_SHA,
+        data_provenance=DATA_PROVENANCE,
+        events=[event(known_at=120)],
+        costs=CostModel(10, 5),
+        walk_forward=plan(),
+        replay_cutoff_utc=120,
+    )
+
+    assert contract.as_dict()["replay_cutoff_utc"] == 120
+    restored = contract.from_mapping(contract.as_dict())
+    assert restored.canonical_sha256() == contract.canonical_sha256()
+
+    with pytest.raises(ChartResearchContractError, match="research cutoff"):
+        build_strategy_research_contract(
+            strategy_id="smc-cutoff",
+            strategy_version="1",
+            instrument_id="BTCUSDT",
+            timeframe_seconds=60,
+            feature_rule_version="smc-v1",
+            data_sha256=DATA_SHA,
+            data_provenance=DATA_PROVENANCE,
+            events=[event(known_at=121)],
+            costs=CostModel(10, 5),
+            walk_forward=plan(),
+            replay_cutoff_utc=120,
+        )
+
+
 def test_duplicate_ids_and_mismatched_event_identity_are_rejected():
     with pytest.raises(ChartResearchContractError, match="duplicate"):
         validate_chart_events([event(), event()])
