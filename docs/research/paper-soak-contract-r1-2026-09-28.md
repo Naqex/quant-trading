@@ -10,6 +10,8 @@ broker connectivity and live execution.
   counts, finite VND amounts, non-negative fee/slippage and content hashes;
 - a mismatch or unhealthy day must carry a pause/stop reason;
 - dates are unique and sorted, and the evidence window cannot exceed 60 days;
+- point-in-time input cutoffs advance strictly with the ordered UTC days, so a
+  later observation cannot silently reuse an earlier information boundary;
 - restart observations must report zero duplicate intents before they can be
   marked passed;
 - a receipt marked `ACCEPTED` requires at least 30 days, all days healthy and

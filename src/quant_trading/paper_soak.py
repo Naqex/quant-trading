@@ -279,6 +279,16 @@ class PaperSoakReceipt:
         ordered_dates = [item.date_utc for item in days]
         if ordered_dates != sorted(set(ordered_dates)):
             raise PaperSoakError("daily_reconciliation dates must be unique and sorted")
+        cutoff_timestamps = [item.input_cutoff_utc for item in days]
+        if any(
+            current <= previous
+            for previous, current in zip(
+                cutoff_timestamps, cutoff_timestamps[1:], strict=False
+            )
+        ):
+            raise PaperSoakError(
+                "daily_reconciliation input_cutoff_utc values must be strictly increasing"
+            )
         if len(days) > MAXIMUM_SOAK_DAYS:
             raise PaperSoakError("paper-soak evidence cannot exceed 60 observed days")
         if self.status not in {"NOT_RUN", "OBSERVED", "ACCEPTED", "REJECTED"}:

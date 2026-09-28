@@ -178,3 +178,14 @@ def test_duplicate_dates_and_restart_duplicates_fail_closed() -> None:
             evidence_hash=HASH,
         )
 
+
+def test_daily_cutoffs_must_advance_with_observation_dates() -> None:
+    first = _day(1)
+    second_payload = _day(2).as_dict()
+    second_payload["input_cutoff_utc"] = first.input_cutoff_utc
+    with pytest.raises(PaperSoakError, match="input_cutoff_utc.*strictly increasing"):
+        PaperSoakReceipt(
+            daily_reconciliation=(first, PaperSoakDay(**second_payload)),
+            status="OBSERVED",
+        )
+
