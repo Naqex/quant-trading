@@ -213,9 +213,12 @@ def audit_ohlcv(frame: pd.DataFrame, *, policy: OHLCVQualityPolicy | None = None
 
     errors: list[str] = []
     warnings: list[str] = []
+    if not frame.columns.is_unique:
+        errors.append("duplicate_columns")
     missing = tuple(column for column in REQUIRED_COLUMNS if column not in frame.columns)
     if missing:
         errors.append("missing_required_columns:" + ",".join(missing))
+    if errors:
         return OHLCVQualityReceipt(
             quality_status="rejected",
             rows=len(frame),

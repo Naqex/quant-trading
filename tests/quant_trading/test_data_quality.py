@@ -114,6 +114,20 @@ def test_nonfinite_and_missing_schema_are_rejected() -> None:
     assert missing_receipt.errors == ("missing_required_columns:volume",)
 
 
+@pytest.mark.parametrize("column", ["open_time", "open", "volume"])
+def test_duplicate_column_labels_are_rejected_before_pandas_coercion(column: str) -> None:
+    frame = _frame()
+    frame.insert(1, column, frame[column].to_numpy(copy=True), allow_duplicates=True)
+
+    receipt = audit_ohlcv(frame)
+
+    assert receipt.quality_status == "rejected"
+    assert receipt.data_sha256 is None
+    assert receipt.errors == ("duplicate_columns",)
+    with pytest.raises(DataQualityError, match="duplicate_columns"):
+        require_ohlcv_quality(frame)
+
+
 def test_policy_rejects_ambiguous_values() -> None:
     with pytest.raises(DataQualityError):
         OHLCVQualityPolicy(expected_interval_seconds=0)
