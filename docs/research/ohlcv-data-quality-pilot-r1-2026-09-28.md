@@ -17,6 +17,7 @@ provider/broker/execution vẫn là `false`, trạng thái receipt là `PREP_ONL
 ## Các kiểm tra
 
 - required columns: `open_time`, `open`, `high`, `low`, `close`, `volume`;
+- column labels must be unique; duplicate labels are rejected before pandas coercion;
 - timestamp parse được, duy nhất và tăng dần;
 - OHLCV hữu hạn, giá dương, volume không âm;
 - `high`/`low` bao phủ open và close;
