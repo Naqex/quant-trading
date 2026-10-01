@@ -97,6 +97,8 @@ class OHLCVQualityPolicy:
         limit = self.max_gap_count
         if limit is not None:
             limit = _strict_int(limit, "max_gap_count", minimum=0)
+        if limit is not None and interval is None:
+            raise DataQualityError("max_gap_count requires expected_interval_seconds")
         object.__setattr__(self, "expected_interval_seconds", interval)
         object.__setattr__(self, "max_gap_count", limit)
 
@@ -133,6 +135,8 @@ class OHLCVQualityReceipt:
     def __post_init__(self) -> None:
         if self.quality_status not in {"accepted", "rejected"}:
             raise DataQualityError("quality_status is unsupported")
+        if self.schema != DATA_QUALITY_SCHEMA:
+            raise DataQualityError("quality receipt schema is unsupported")
         if self.status != "PREP_ONLY":
             raise DataQualityError("quality receipt status must remain PREP_ONLY")
         rows = _strict_int(self.rows, "rows", minimum=0)
@@ -144,17 +148,71 @@ class OHLCVQualityReceipt:
             values = getattr(self, name)
             if not isinstance(values, tuple) or any(not isinstance(item, str) or not item for item in values):
                 raise DataQualityError(f"{name} must be a tuple of non-empty strings")
+        normalized_timestamps: dict[str, str | None] = {}
+        for name in ("start_utc", "end_utc"):
+            value = getattr(self, name)
+            if value is None:
+                normalized_timestamps[name] = None
+                continue
+            if not isinstance(value, str) or not value.strip():
+                raise DataQualityError(f"{name} must be a canonical UTC timestamp or None")
+            try:
+                normalized = _normalize_timestamp(value)
+            except (TypeError, ValueError, OverflowError) as exc:
+                raise DataQualityError(f"{name} must be a canonical UTC timestamp or None") from exc
+            if normalized != value:
+                raise DataQualityError(f"{name} must be a canonical UTC timestamp")
+            normalized_timestamps[name] = normalized
+        if (normalized_timestamps["start_utc"] is None) != (normalized_timestamps["end_utc"] is None):
+            raise DataQualityError("start_utc and end_utc must be provided together")
+        if (
+            normalized_timestamps["start_utc"] is not None
+            and normalized_timestamps["end_utc"] is not None
+            and normalized_timestamps["start_utc"] > normalized_timestamps["end_utc"]
+        ):
+            raise DataQualityError("start_utc cannot be later than end_utc")
+        for name, value in normalized_timestamps.items():
+            object.__setattr__(self, name, value)
         for name in ("observed_interval_seconds", "min_interval_seconds", "max_interval_seconds"):
             value = getattr(self, name)
-            if value is not None and (not math.isfinite(float(value)) or float(value) < 0.0):
-                raise DataQualityError(f"{name} must be finite and >= 0")
+            if value is not None:
+                normalized = _finite(value, name)
+                if normalized < 0.0:
+                    raise DataQualityError(f"{name} must be finite and >= 0")
+                object.__setattr__(self, name, normalized)
+        intervals = tuple(
+            getattr(self, name)
+            for name in ("observed_interval_seconds", "min_interval_seconds", "max_interval_seconds")
+        )
+        if any(value is None for value in intervals) and any(value is not None for value in intervals):
+            raise DataQualityError("interval metrics must be provided together")
+        if all(value is not None for value in intervals):
+            observed, minimum, maximum = intervals
+            assert observed is not None and minimum is not None and maximum is not None
+            if minimum > maximum:
+                raise DataQualityError("min_interval_seconds cannot exceed max_interval_seconds")
+            if not minimum <= observed <= maximum:
+                raise DataQualityError("observed_interval_seconds must be within min/max interval")
+        if self.quality_status == "accepted":
+            if rows == 0:
+                raise DataQualityError("accepted receipt must contain at least one row")
+            if self.data_sha256 is None:
+                raise DataQualityError("accepted receipt requires data_sha256")
+            if self.errors:
+                raise DataQualityError("accepted receipt cannot contain errors")
+            if self.start_utc is None or self.end_utc is None:
+                raise DataQualityError("accepted receipt requires start_utc and end_utc")
+            if rows > 1 and any(value is None for value in intervals):
+                raise DataQualityError("accepted multi-row receipt requires interval metrics")
+        elif not self.errors:
+            raise DataQualityError("rejected receipt requires at least one error")
         if self.gap_count is not None:
             gap_count = _strict_int(self.gap_count, "gap_count", minimum=0)
             if gap_count > max(rows - 1, 0):
                 raise DataQualityError("gap_count cannot exceed interval count")
+            if self.policy.expected_interval_seconds is None:
+                raise DataQualityError("gap_count requires expected_interval_seconds")
             object.__setattr__(self, "gap_count", gap_count)
-        if self.quality_status == "accepted" and self.errors:
-            raise DataQualityError("accepted receipt cannot contain errors")
         for name in ("execution_capability", "provider_access", "broker_access"):
             if getattr(self, name) is not False:
                 raise DataQualityError(f"{name} must remain false for offline quality")

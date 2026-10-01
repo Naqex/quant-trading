@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 
 import numpy as np
 import pandas as pd
@@ -133,5 +134,41 @@ def test_policy_rejects_ambiguous_values() -> None:
         OHLCVQualityPolicy(expected_interval_seconds=0)
     with pytest.raises(DataQualityError):
         OHLCVQualityPolicy(max_gap_count=-1)
+    with pytest.raises(DataQualityError, match="max_gap_count.*expected_interval_seconds"):
+        OHLCVQualityPolicy(max_gap_count=0)
     with pytest.raises(DataQualityError):
         audit_ohlcv([], policy=OHLCVQualityPolicy())
+
+
+def test_receipt_constructor_enforces_canonical_and_coherent_evidence() -> None:
+    accepted = audit_ohlcv(
+        _frame(),
+        policy=OHLCVQualityPolicy(expected_interval_seconds=3_600, max_gap_count=0),
+    )
+
+    normalized = replace(accepted, observed_interval_seconds="3600")
+    assert normalized.observed_interval_seconds == 3_600.0
+
+    with pytest.raises(DataQualityError, match="schema"):
+        replace(accepted, schema="other-schema")
+    with pytest.raises(DataQualityError, match="canonical UTC timestamp"):
+        replace(accepted, start_utc="2026-01-01T00:00:00Z")
+    with pytest.raises(DataQualityError, match="min_interval_seconds"):
+        replace(accepted, min_interval_seconds=4_000.0)
+    with pytest.raises(DataQualityError, match="requires data_sha256"):
+        replace(accepted, data_sha256=None)
+
+
+def test_rejected_receipt_cannot_hide_missing_diagnostics() -> None:
+    accepted = audit_ohlcv(_frame())
+    with pytest.raises(DataQualityError, match="at least one error"):
+        replace(accepted, quality_status="rejected")
+
+
+@pytest.mark.parametrize(
+    "field", ["observed_interval_seconds", "min_interval_seconds", "max_interval_seconds"]
+)
+def test_receipt_rejects_negative_interval_metrics(field: str) -> None:
+    accepted = audit_ohlcv(_frame())
+    with pytest.raises(DataQualityError, match="finite and >= 0"):
+        replace(accepted, **{field: -1.0}, receipt_sha256=None)
