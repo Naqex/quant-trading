@@ -362,7 +362,7 @@ class PaperSoakReceipt:
             identity = payload.get("run_identity", {})
             if not isinstance(identity, Mapping):
                 raise PaperSoakError("run_identity must be a mapping")
-            return cls(
+            receipt = cls(
                 daily_reconciliation=daily,
                 restart_checks=restarts,
                 run_id=identity.get("run_id"),
@@ -376,8 +376,19 @@ class PaperSoakReceipt:
                 evidence_level=payload.get("evidence_level", "template_only"),
                 schema=payload.get("schema", PAPER_SOAK_SCHEMA),
                 scope=payload.get("scope", PAPER_SOAK_SCOPE),
+                mode=payload.get("mode", "paper"),
+                promotion_allowed=payload.get("promotion_allowed", False),
+                execution_capability=payload.get("execution_capability", False),
+                provider_access=payload.get("provider_access", False),
+                broker_access=payload.get("broker_access", False),
+                oauth_access=payload.get("oauth_access", False),
                 receipt_sha256=payload.get("receipt_sha256"),
             )
+            # A supplied summary must describe the actual observations; discarding
+            # it would make an unchanged hash appear to endorse a tampered window.
+            if "window" in payload and _canonical(payload["window"]) != _canonical(_core(receipt)["window"]):
+                raise PaperSoakError("window does not match daily reconciliation observations")
+            return receipt
         except (KeyError, TypeError) as exc:
             raise PaperSoakError("paper-soak receipt is malformed") from exc
 

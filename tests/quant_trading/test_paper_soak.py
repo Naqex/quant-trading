@@ -189,3 +189,52 @@ def test_daily_cutoffs_must_advance_with_observation_dates() -> None:
             status="OBSERVED",
         )
 
+
+@pytest.mark.parametrize(
+    "field",
+    [
+        "promotion_allowed", "execution_capability", "provider_access",
+        "broker_access", "oauth_access",
+    ],
+)
+@pytest.mark.parametrize("value", [True, 0, None, "false"])
+def test_mapping_rejects_non_false_capabilities(field: str, value: object) -> None:
+    payload = PaperSoakReceipt().as_dict()
+    payload[field] = value
+
+    with pytest.raises(PaperSoakError, match=field):
+        PaperSoakReceipt.from_mapping(payload)
+
+
+def test_mapping_rejects_live_mode_instead_of_normalizing_to_paper() -> None:
+    payload = PaperSoakReceipt().as_dict()
+    payload["mode"] = "live"
+
+    with pytest.raises(PaperSoakError, match="paper mode"):
+        PaperSoakReceipt.from_mapping(payload)
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("observed_days", 30), ("observed_days", False),
+        ("start_date_utc", "2026-01-01"), ("end_date_utc", "2026-01-30"),
+        ("minimum_days", 1), ("maximum_days", 365),
+    ],
+)
+def test_mapping_rejects_window_claims_that_disagree_with_observations(
+    field: str, value: object,
+) -> None:
+    payload = PaperSoakReceipt().as_dict()
+    payload["window"][field] = value
+
+    with pytest.raises(PaperSoakError, match="window"):
+        PaperSoakReceipt.from_mapping(payload)
+
+
+def test_mapping_can_read_legacy_receipt_without_optional_window_or_capabilities() -> None:
+    payload = {"status": "NOT_RUN"}
+    receipt = PaperSoakReceipt.from_mapping(payload)
+
+    assert receipt.as_dict() == PaperSoakReceipt().as_dict()
+

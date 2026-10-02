@@ -18,6 +18,14 @@ broker connectivity and live execution.
   reconciled, at least one passed restart check, and explicit owner review;
 - canonical JSON hashing makes the receipt tamper-evident and round-trippable.
 
+The mapping loader validates any supplied mode and capability fields through
+the same constructor boundary. It rejects live mode and every capability
+value other than literal `false`, rather than discarding them and applying
+safe defaults. A supplied `window` must match the dates/count of the actual
+observations and the fixed 30–60 day policy; an unchanged receipt hash cannot
+endorse a modified summary. Legacy mappings that omit those fields remain
+readable with paper-only, capability-free defaults.
+
 Every receipt is `PREP_ONLY_OFFLINE`. `promotion_allowed`,
 `execution_capability`, provider, broker and OAuth access are literal `false`,
 including for an `ACCEPTED` observation. A paper result therefore cannot widen
@@ -48,3 +56,13 @@ uv run ruff check src/quant_trading/paper_soak.py tests/quant_trading/test_paper
 
 Both checks pass for this slice. No network, provider, broker, OAuth, wallet,
 holdout or Job12 process was touched.
+
+### Mapping validation repair — 2026-10-02
+
+The loader previously ignored supplied mode/capabilities and the window
+summary. A template carrying `mode="live"`, `execution_capability=true`, or
+`observed_days=30` was silently reloaded as an unrun, safe template. The
+regressions first reproduced 27 failures, then passed after the repair:
+35 focused paper-soak cases and all 257 project tests passed. Ruff over
+`src tests` passed. This verifies offline serialization only; the 30–60 day
+forward observation and host-supervisor/restore/alert gates remain unrun.
