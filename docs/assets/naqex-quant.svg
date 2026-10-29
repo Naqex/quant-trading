@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 176" role="img" aria-labelledby="title desc">
+  <title id="title">Naqex QUANT LAB</title>
+  <desc id="desc">Research · Backtest · Evidence</desc>
+  <rect width="1000" height="176" fill="#111318"/>
+  <g transform="translate(46 43) scale(3)" fill="none" stroke="#F2F3F5" stroke-width="3.2" stroke-linecap="square" stroke-linejoin="miter">
+    <path d="M3 27V3l24 24V3"/>
+  </g>
+  <text x="170" y="72" fill="#9DA3AE" font-family="Arial, sans-serif" font-size="18" letter-spacing="5">NAQEX</text>
+  <text x="167" y="119" fill="#F2F3F5" font-family="Arial, sans-serif" font-size="40" font-weight="700" letter-spacing="1">QUANT LAB</text>
+  <text x="948" y="114" text-anchor="end" fill="#9DA3AE" font-family="Arial, sans-serif" font-size="16">Research · Backtest · Evidence</text>
+</svg>

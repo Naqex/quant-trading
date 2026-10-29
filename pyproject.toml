@@ -1,4 +1,6 @@
 [project]
+license = "LicenseRef-Naqex-Source-Available-1.0.0"
+license-files = ["LICENSE"]
 name = "quant-lab"
 version = "0.1.0"
 description = "A small, transparent crypto quant research lab."
