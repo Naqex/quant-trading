@@ -72,6 +72,29 @@ def test_gap_budget_can_fail_closed_without_repairing_rows() -> None:
         )
 
 
+@pytest.mark.parametrize("unit", ["s", "ms", "us", "ns"])
+def test_daily_cadence_and_gap_budget_are_independent_of_datetime_unit(unit: str) -> None:
+    frame = _frame(step="1D")
+    frame["open_time"] = frame["open_time"].dt.as_unit(unit)
+    original = frame.copy(deep=True)
+    policy = OHLCVQualityPolicy(expected_interval_seconds=86_400, max_gap_count=0)
+
+    regular = audit_ohlcv(frame, policy=policy)
+    assert regular.quality_status == "accepted"
+    assert regular.observed_interval_seconds == 86_400.0
+    assert regular.gap_count == 0
+
+    missing_day = frame.drop(index=2).reset_index(drop=True)
+    gap = audit_ohlcv(missing_day, policy=policy)
+    assert gap.quality_status == "rejected"
+    assert gap.gap_count == 1
+    assert gap.max_interval_seconds == 172_800.0
+    assert gap.errors == ("gap_budget_exceeded",)
+    with pytest.raises(DataQualityError, match="gap_budget_exceeded"):
+        require_ohlcv_quality(missing_day, policy=policy)
+    pd.testing.assert_frame_equal(frame, original)
+
+
 @pytest.mark.parametrize(
     ("column", "value", "error"),
     [
