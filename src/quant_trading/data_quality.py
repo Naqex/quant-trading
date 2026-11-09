@@ -336,7 +336,7 @@ def audit_ohlcv(frame: pd.DataFrame, *, policy: OHLCVQualityPolicy | None = None
         end_utc = _normalize_timestamp(timestamps.iloc[-1])
         data_sha256 = _canonical_frame(frame, timestamps, numeric)
         if len(timestamps) > 1:
-            seconds = np.diff(timestamps.astype("int64").to_numpy(dtype=np.int64)) / 1_000_000_000
+            seconds = timestamps.diff().dropna().dt.total_seconds().to_numpy(dtype=np.float64)
             if not np.isfinite(seconds).all() or (seconds <= 0).any():
                 errors.append("invalid_timestamp_interval")
             else:
