@@ -84,6 +84,10 @@ rollback độc lập:
   thuần nhân quả (không survivorship bias, không forward-fill trước niêm yết),
   chiến lược Sleeve #2 (`F4` EMA + BTC filter, `F3` Donchian), backtest đa tài
   sản `t -> t+1` có delisting haircut và pipeline smoke offline.
+- `quant_lab.stress_report`: báo cáo stress định chế thuần offline gồm purged
+  walk-forward (`t -> t+1`), thang phí `10 / 20 / 35 bps` + điểm hòa vốn chi phí,
+  lưới plateau tham số `+-20%`, block-bootstrap 95% CI Sharpe/CAGR và tail
+  drawdown CVaR 5% (`quant-lab stress-report`).
 
 Các primitive này chỉ nhận fixture đã capture, không gọi provider/broker/network
 và luôn giữ `execution_capability=false`. BOCPD/change-point, regime label,
@@ -117,6 +121,8 @@ Chạy kiểm tra sức khỏe/đối soát paper-soak offline (không mạng, k
 ```powershell
 uv run quant-lab soak-check --smoke --strategy f4 --days 5
 uv run quant-lab soak-check --receipt path/to/paper_soak_receipt.json --max-slippage-bps 15
+uv run quant-lab data-audit --dir data/raw --timeframe 1d --json
+uv run quant-lab stress-report --smoke --strategy ma --out-md reports/stress_smoke.md
 ```
 
 Kết quả được in ra màn hình và lưu trong `reports/`.
