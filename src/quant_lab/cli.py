@@ -3,12 +3,13 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
+from typing import Any
 
 import pandas as pd
 
 from quant_lab.backtest import run_backtest
 from quant_lab.causal_universe import run_sleeve2_offline_smoke
-from quant_lab.data import download_binance_klines, load_candles, save_candles
+from quant_lab.data import audit_ohlcv_directory, download_binance_klines, load_candles, save_candles
 from quant_lab.metrics import performance_metrics
 from quant_lab.strategies import buy_and_hold_signal, moving_average_trend_signal
 from quant_trading.paper_soak import (
@@ -168,6 +169,51 @@ def soak_check_command(args: argparse.Namespace) -> None:
         raise SystemExit(f"Paper-soak receipt REJECTED: {', '.join(report.blockers)}")
 
 
+def _print_data_audit(report: dict[str, Any]) -> None:
+    summary = report["summary"]
+    print(f"\nOHLCV Data Audit ({report['scope']}) -> {report['status']}")
+    print(
+        f"  files_scanned : {summary['files_scanned']}"
+        f" (passed={summary['passed_symbols']}, failed={summary['failed_symbols']})"
+    )
+    print(
+        f"  total_rows    : {summary['total_rows']:,}"
+        f" | total_gaps={summary['total_gaps']}"
+        f" | zero_volume_bars={summary['total_zero_volume_bars']}"
+    )
+    if report["errors"]:
+        print(f"  errors        : {', '.join(report['errors'])}")
+    for item in report["symbols"]:
+        err_suffix = f" | errors={','.join(item['errors'])}" if item["errors"] else ""
+        print(
+            f"  [{item['status']:4s}] {item['symbol']:10s} ({item['timeframe']}) "
+            f"rows={item['rows']} first={item['first_utc']} last={item['last_utc']} "
+            f"dup={item['duplicate_timestamps']} order={item['monotonic_violations']} "
+            f"gaps={item['missing_candle_gaps']} nonpos={item['non_positive_prices']} "
+            f"nonfin={item['non_finite_prices']} ohlc={item['ohlc_consistency_violations']} "
+            f"zvol={item['zero_volume_bars']}{err_suffix}"
+        )
+    print(f"  report_sha256 : {report['report_sha256']}")
+
+
+def data_audit_command(args: argparse.Namespace) -> None:
+    try:
+        report = audit_ohlcv_directory(args.dir, timeframe=args.timeframe)
+    except (FileNotFoundError, ValueError) as exc:
+        raise SystemExit(f"Data audit error: {exc}") from exc
+
+    if args.json:
+        print(json.dumps(report, indent=2, sort_keys=True, allow_nan=False))
+        if report["status"] != "PASS":
+            raise SystemExit(1)
+    else:
+        _print_data_audit(report)
+        if report["status"] != "PASS":
+            raise SystemExit(
+                f"OHLCV data audit FAILED ({report['summary']['failed_symbols']} failed symbol(s))."
+            )
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Transparent crypto quant research lab")
     commands = parser.add_subparsers(dest="command", required=True)
@@ -205,6 +251,20 @@ def build_parser() -> argparse.ArgumentParser:
     soak_check.add_argument("--write-receipt", help="Optional JSON path to save generated smoke receipt")
     soak_check.add_argument("--json", action="store_true", help="Emit canonical JSON output")
     soak_check.set_defaults(handler=soak_check_command)
+
+    data_audit = commands.add_parser(
+        "data-audit",
+        help="Audit offline CSV/Parquet OHLCV directories for gaps and data quality anomalies",
+    )
+    data_audit.add_argument("--dir", required=True, help="Directory containing CSV/Parquet OHLCV files")
+    data_audit.add_argument(
+        "--timeframe",
+        choices=("1d", "4h", "1h"),
+        default=None,
+        help="Expected candle timeframe (defaults to filename suffix or 1d)",
+    )
+    data_audit.add_argument("--json", action="store_true", help="Emit canonical JSON report")
+    data_audit.set_defaults(handler=data_audit_command)
     return parser
 
 
