@@ -12,6 +12,14 @@ from quant_lab.causal_universe import run_sleeve2_offline_smoke
 from quant_lab.data import audit_ohlcv_directory, download_binance_klines, load_candles, save_candles
 from quant_lab.metrics import performance_metrics
 from quant_lab.strategies import buy_and_hold_signal, moving_average_trend_signal
+from quant_lab.stress_report import (
+    StressReportConfig,
+    StressReportError,
+    build_smoke_ohlcv,
+    load_close_from_ohlcv,
+    render_stress_report_markdown,
+    run_stress_report,
+)
 from quant_trading.paper_soak import (
     PaperSoakError,
     PaperSoakHealthReport,
@@ -214,6 +222,100 @@ def data_audit_command(args: argparse.Namespace) -> None:
             )
 
 
+def _print_stress_report(report: dict[str, Any]) -> None:
+    wfo = report["purged_walk_forward"]
+    strat = wfo["stitched_strategy_metrics"]
+    fee = report["fee_sensitivity"]
+    plat = report["parameter_plateau"]
+    boot = report["bootstrap"]
+    dd = boot["tail_drawdown"]
+    print(f"\nQuant Lab Offline Stress Report ({report['scope']}) -> {report['status']}")
+    print(
+        f"  strategy         : {plat['center_variant_id']}"
+        f" | folds={wfo['fold_count']} (purge={wfo['purge_bars']})"
+    )
+    print(
+        f"  stitched OOS     : cagr={strat['cagr']} sharpe={strat['sharpe_zero_rate']}"
+        f" max_dd={strat['max_drawdown']} turnover={strat['annual_turnover']}"
+    )
+    print(
+        f"  fee breakeven    : {fee['cost_breakeven_bps']:.2f} bps"
+        f" (threshold >= {fee['min_cost_breakeven_bps']:.2f} bps)"
+    )
+    print(
+        f"  plateau (+-20%)  : {plat['positive_variant_count']}/{plat['variant_count']} positive"
+        f" (med_sharpe={plat['sharpe_median']}, retention={plat['retention_ratio']})"
+    )
+    print(
+        f"  bootstrap 95% CI : sharpe=[{boot['sharpe_ci_95']['lo']}, {boot['sharpe_ci_95']['hi']}]"
+        f" cagr=[{boot['cagr_ci_95']['lo']}, {boot['cagr_ci_95']['hi']}]"
+    )
+    print(
+        f"  tail drawdown    : obs_dd={dd['observed_max_drawdown']}"
+        f" worst5_var={dd['worst_5pct_drawdown_var']} worst5_cvar={dd['worst_5pct_drawdown_cvar']}"
+    )
+    if report["blockers"]:
+        print(f"  blockers         : {', '.join(report['blockers'])}")
+    print(f"  report_sha256    : {report['report_sha256']}")
+
+
+def stress_report_command(args: argparse.Namespace) -> None:
+    if bool(args.input) == bool(args.smoke):
+        raise SystemExit("Specify exactly one of --input PATH or --smoke.")
+
+    try:
+        config = StressReportConfig(
+            strategy=args.strategy,
+            fast=args.fast,
+            slow=args.slow,
+            entry_window=args.entry,
+            exit_window=args.exit,
+            lookback=args.lookback,
+            train_bars=args.train_bars,
+            test_bars=args.test_bars,
+            purge_bars=args.purge_bars,
+            slippage_bps=args.slippage_bps,
+            bootstrap_resamples=args.bootstrap_resamples,
+            block_length=args.block_length,
+            seed=args.seed,
+            min_cost_breakeven_bps=args.min_breakeven_bps,
+            min_plateau_pass_rate=args.min_plateau_pass_rate,
+            min_plateau_median_sharpe=args.min_plateau_sharpe,
+        )
+        if args.smoke:
+            smoke_df = build_smoke_ohlcv(seed=args.seed)
+            close = pd.Series(
+                smoke_df["close"].to_numpy(dtype=float),
+                index=pd.DatetimeIndex(smoke_df["open_time"]),
+                name="close",
+            )
+            report = run_stress_report(close, config=config, input_source=f"offline_smoke:seed={args.seed}")
+        else:
+            close, data_sha = load_close_from_ohlcv(args.input)
+            report = run_stress_report(
+                close,
+                config=config,
+                input_source=f"file:{Path(args.input).name}",
+                input_sha256=data_sha,
+            )
+    except (FileNotFoundError, StressReportError, ValueError) as exc:
+        raise SystemExit(f"Stress report error: {exc}") from exc
+
+    if args.out_md is not None:
+        out_path = Path(args.out_md)
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        out_path.write_text(render_stress_report_markdown(report), encoding="utf-8")
+
+    if args.json:
+        print(json.dumps(report, indent=2, sort_keys=True, allow_nan=False))
+        if report["status"] != "PASS":
+            raise SystemExit(1)
+    else:
+        _print_stress_report(report)
+        if report["status"] != "PASS":
+            raise SystemExit(f"Stress report FAILED: {', '.join(report['blockers'])}")
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Transparent crypto quant research lab")
     commands = parser.add_subparsers(dest="command", required=True)
@@ -265,6 +367,36 @@ def build_parser() -> argparse.ArgumentParser:
     )
     data_audit.add_argument("--json", action="store_true", help="Emit canonical JSON report")
     data_audit.set_defaults(handler=data_audit_command)
+
+    stress = commands.add_parser(
+        "stress-report",
+        help="Run purged WFO, 10/20/35 bps fee ladder, +-20% plateau, and block-bootstrap CI offline",
+    )
+    stress.add_argument("--input", help="Path to local CSV/Parquet OHLCV file")
+    stress.add_argument(
+        "--smoke",
+        action="store_true",
+        help="Run on deterministic offline synthetic fixture (zero network/API keys)",
+    )
+    stress.add_argument("--strategy", choices=("ma", "donchian", "momentum"), default="ma")
+    stress.add_argument("--fast", type=int, default=20)
+    stress.add_argument("--slow", type=int, default=60)
+    stress.add_argument("--entry", type=int, default=40)
+    stress.add_argument("--exit", type=int, default=20)
+    stress.add_argument("--lookback", type=int, default=60)
+    stress.add_argument("--train-bars", type=int, default=180)
+    stress.add_argument("--test-bars", type=int, default=60)
+    stress.add_argument("--purge-bars", type=int, default=5)
+    stress.add_argument("--slippage-bps", type=float, default=5.0)
+    stress.add_argument("--min-breakeven-bps", type=float, default=35.0)
+    stress.add_argument("--min-plateau-pass-rate", type=float, default=0.60)
+    stress.add_argument("--min-plateau-sharpe", type=float, default=0.0)
+    stress.add_argument("--bootstrap-resamples", type=int, default=1_000)
+    stress.add_argument("--block-length", type=int, default=7)
+    stress.add_argument("--seed", type=int, default=20261125)
+    stress.add_argument("--out-md", help="Optional Markdown summary destination path")
+    stress.add_argument("--json", action="store_true", help="Emit canonical JSON report")
+    stress.set_defaults(handler=stress_report_command)
     return parser
 
 
