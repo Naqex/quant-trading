@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from datetime import UTC, datetime
 
 import pytest
 
@@ -18,9 +19,10 @@ HASH = "a" * 64
 
 def _day(index: int, *, health: str = "healthy", reconciliation: str = "reconciled") -> PaperSoakDay:
     reason = None if health == "healthy" and reconciliation == "reconciled" else "fixture health gate"
+    cutoff = int(datetime(2026, 1, index, 23, 59, 0, tzinfo=UTC).timestamp())
     return PaperSoakDay(
         date_utc=f"2026-01-{index:02d}",
-        input_cutoff_utc=index,
+        input_cutoff_utc=cutoff,
         candidate_count=2,
         paper_intents=1,
         fills=1,
@@ -36,10 +38,10 @@ def _day(index: int, *, health: str = "healthy", reconciliation: str = "reconcil
     )
 
 
-def _restart() -> PaperSoakRestartCheck:
+def _restart(*, attempt_no: int = 1, day_index: int = 1) -> PaperSoakRestartCheck:
     return PaperSoakRestartCheck(
-        observed_at_utc=100,
-        attempt_no=2,
+        observed_at_utc=int(datetime(2026, 1, day_index, 12, 0, 0, tzinfo=UTC).timestamp()),
+        attempt_no=attempt_no,
         checkpoint="cp-001",
         duplicate_intents=0,
         status="passed",
@@ -149,6 +151,7 @@ def test_accepted_rejects_unhealthy_days_and_tampered_receipt() -> None:
             risk_budget_sha256=HASH,
             owner_reviewed=True,
             status="ACCEPTED",
+            evidence_level="paper_observation",
         )
 
     accepted = PaperSoakReceipt(
@@ -162,6 +165,7 @@ def test_accepted_rejects_unhealthy_days_and_tampered_receipt() -> None:
         risk_budget_sha256=HASH,
         owner_reviewed=True,
         status="ACCEPTED",
+        evidence_level="paper_observation",
     )
     with pytest.raises(PaperSoakError, match="does not match"):
         replace(accepted, receipt_sha256="0" * 64)
@@ -184,11 +188,89 @@ def test_duplicate_dates_and_restart_duplicates_fail_closed() -> None:
 def test_daily_cutoffs_must_advance_with_observation_dates() -> None:
     first = _day(1)
     second_payload = _day(2).as_dict()
+    second_payload["date_utc"] = "2026-01-01"
     second_payload["input_cutoff_utc"] = first.input_cutoff_utc
-    with pytest.raises(PaperSoakError, match="input_cutoff_utc.*strictly increasing"):
+    with pytest.raises(PaperSoakError, match="unique and sorted"):
         PaperSoakReceipt(
             daily_reconciliation=(first, PaperSoakDay(**second_payload)),
             status="OBSERVED",
+        )
+    # Different date with mismatched cutoff date fails closed in PaperSoakDay itself
+    bad_cutoff = _day(2).as_dict()
+    bad_cutoff["input_cutoff_utc"] = first.input_cutoff_utc
+    with pytest.raises(PaperSoakError, match="must match date_utc"):
+        PaperSoakDay(**bad_cutoff)
+
+
+def test_cross_field_and_accepted_safety_invariants_fail_closed() -> None:
+    # paper_intents > candidate_count
+    bad_intents = _day(1).as_dict()
+    bad_intents["paper_intents"] = 5
+    with pytest.raises(PaperSoakError, match="paper_intents cannot exceed candidate_count"):
+        PaperSoakDay(**bad_intents)
+
+    # NOT_RUN rejects owner_reviewed=True and identity hashes
+    with pytest.raises(PaperSoakError, match="owner_reviewed"):
+        PaperSoakReceipt(status="NOT_RUN", owner_reviewed=True)
+    with pytest.raises(PaperSoakError, match="run identity or hashes"):
+        PaperSoakReceipt(
+            status="NOT_RUN", config_sha256=HASH, strategy_sha256=HASH, risk_budget_sha256=HASH
+        )
+
+    # Restart attempt_no mismatch and out-of-window timestamp
+    with pytest.raises(PaperSoakError, match="attempt_no must match"):
+        PaperSoakReceipt(
+            daily_reconciliation=(_day(1),),
+            restart_checks=(_restart(attempt_no=2),),
+            **_identity(),
+            status="OBSERVED",
+            evidence_level="paper_observation",
+        )
+    with pytest.raises(PaperSoakError, match="within soak window"):
+        PaperSoakReceipt(
+            daily_reconciliation=(_day(1),),
+            restart_checks=(_restart(day_index=5),),
+            **_identity(),
+            status="OBSERVED",
+            evidence_level="paper_observation",
+        )
+
+    days_30 = tuple(_day(i) for i in range(1, 31))
+    # ACCEPTED rejects synthetic evidence_level
+    for synthetic in ("template_only", "offline_fixture", "offline_smoke_fixture"):
+        with pytest.raises(PaperSoakError, match="synthetic evidence_level"):
+            PaperSoakReceipt(
+                daily_reconciliation=days_30,
+                restart_checks=(_restart(),),
+                **_identity(),
+                owner_reviewed=True,
+                status="ACCEPTED",
+                evidence_level=synthetic,
+            )
+
+    # ACCEPTED rejects calendar gaps
+    gapped_30 = tuple(_day(i) for i in range(1, 15)) + tuple(_day(i) for i in range(16, 32))
+    with pytest.raises(PaperSoakError, match="contiguous UTC calendar days"):
+        PaperSoakReceipt(
+            daily_reconciliation=gapped_30,
+            restart_checks=(_restart(),),
+            **_identity(),
+            owner_reviewed=True,
+            status="ACCEPTED",
+            evidence_level="paper_observation",
+        )
+
+    # ACCEPTED rejects fills > paper_intents
+    excess = _day(1).as_dict()
+    excess["fills"] = 2
+    with pytest.raises(PaperSoakError, match="fills exceeding paper_intents"):
+        PaperSoakReceipt(
+            daily_reconciliation=(PaperSoakDay(**excess),) + days_30[1:],
+            restart_checks=(_restart(),),
+            **_identity(),
+            owner_reviewed=True,
+            status="ACCEPTED",
+            evidence_level="paper_observation",
         )
 
 

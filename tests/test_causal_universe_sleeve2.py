@@ -125,9 +125,19 @@ def test_sleeve2_paper_soak_receipt_fail_closed() -> None:
         status="passed",
         evidence_hash="a" * 64,
     )
-    obs = build_sleeve2_paper_soak_receipt(days[:5], [restart], owner_reviewed=False)
+    early_restart = PaperSoakRestartCheck(
+        observed_at_utc=1_790_812_800 + 2 * 86_400,
+        attempt_no=1,
+        checkpoint="day-3-restart",
+        duplicate_intents=0,
+        status="passed",
+        evidence_hash="c" * 64,
+    )
+    obs = build_sleeve2_paper_soak_receipt(days[:5], [early_restart], owner_reviewed=False)
     assert obs.status == "OBSERVED"
     assert obs.execution_capability is False
+    with pytest.raises(PaperSoakError, match="within soak window"):
+        build_sleeve2_paper_soak_receipt(days[:5], [restart], owner_reviewed=False)
 
     acc = build_sleeve2_paper_soak_receipt(days, [restart], owner_reviewed=True)
     assert acc.status == "ACCEPTED"
@@ -318,3 +328,118 @@ def test_sleeve2_offline_smoke_and_cli_roundtrip(strategy: str, tmp_path, capsys
     bad_args = parser.parse_args(["soak-check", "--receipt", str(tampered_path)])
     with pytest.raises(SystemExit, match="execution_capability"):
         bad_args.handler(bad_args)
+
+    # Attempting to promote a synthetic smoke receipt to ACCEPTED must exit non-zero
+    fake_accepted = json.loads(receipt_path.read_text(encoding="utf-8"))
+    fake_accepted["status"] = "ACCEPTED"
+    fake_accepted["owner_reviewed"] = True
+    fake_accepted["receipt_sha256"] = None
+    fake_path = tmp_path / "fake_accepted.json"
+    fake_path.write_text(json.dumps(fake_accepted), encoding="utf-8")
+    fake_args = parser.parse_args(["soak-check", "--receipt", str(fake_path)])
+    with pytest.raises(SystemExit, match="Paper-soak check failed"):
+        fake_args.handler(fake_args)
+
+
+def test_multi_asset_backtest_drifted_turnover_enter_then_delist_and_bankruptcy_floor() -> None:
+    # 1) Constant-mix rebalancing must pay true post-return drift turnover
+    idx = pd.date_range("2024-01-01", periods=3, freq="1D", tz="UTC")
+    close = pd.DataFrame({"BTCUSDT": [100.0, 200.0, 200.0], "ETHUSDT": [100.0, 100.0, 100.0]}, index=idx)
+    tw = pd.DataFrame({"BTCUSDT": [0.5, 0.5, 0.5], "ETHUSDT": [0.5, 0.5, 0.5]}, index=idx)
+    bt = run_multi_asset_spot_backtest(close, tw, fee_bps=10.0, slippage_bps=5.0)
+    # Bar 1 (+100% BTC, 0% ETH) drifts weights to [2/3, 1/3]; rebalance back to [0.5, 0.5] = 1/3 turnover
+    assert bt["turnover"].iloc[2] == pytest.approx(1.0 / 3.0, abs=1e-9)
+
+    # 2) Enter-then-delist bar pays BOTH entry and forced exit turnover + delisting haircut
+    close_delist = pd.DataFrame(
+        {"BTCUSDT": [100.0, 100.0, 100.0], "WAVESUSDT": [50.0, 50.0, np.nan]}, index=idx
+    )
+    tw_delist = pd.DataFrame({"BTCUSDT": [0.5, 0.5, 0.5], "WAVESUSDT": [0.0, 0.5, 0.0]}, index=idx)
+    bt_d = run_multi_asset_spot_backtest(
+        close_delist, tw_delist, fee_bps=10.0, slippage_bps=5.0, delist_haircut_bps=100.0
+    )
+    assert bt_d["delist_exit_weight"].iloc[2] == pytest.approx(0.5)
+    assert bt_d["turnover"].iloc[2] == pytest.approx(1.0)
+    assert bt_d["cost"].iloc[2] == pytest.approx(1.0 * 0.0015 + 0.5 * 0.01)
+
+    # 3) Bankruptcy floor keeps equity >= 0.0 and metrics finite
+    bust_idx = pd.date_range("2024-01-01", periods=4, freq="1D", tz="UTC")
+    close_bust = pd.DataFrame({"BTCUSDT": [100.0, 100.0, 0.1, 10.0]}, index=bust_idx)
+    tw_bust = pd.DataFrame({"BTCUSDT": [0.0, 1.0, 1.0, 1.0]}, index=bust_idx)
+    bt_bust = run_multi_asset_spot_backtest(close_bust, tw_bust, fee_bps=50.0, slippage_bps=50.0)
+    assert bt_bust["equity"].iloc[2] == 0.0
+    assert bt_bust["equity"].iloc[3] == 0.0
+    assert bt_bust["gross_exposure"].iloc[3] == 0.0
+    metrics = performance_metrics(bt_bust, periods_per_year=365)
+    assert metrics["cagr"] == pytest.approx(-1.0)
+
+
+def test_ema_warmup_after_nan_gap_zero_vol_safety_and_halted_volume_mask() -> None:
+    # 1) Single NaN BTC bar must force full btc_slow warmup (never flipping btc_bull=True after 1 bar)
+    p = _synthetic_4h_panel(n_bars=120, seed=42)
+    close = p["close"].copy()
+    qv = p["quote_volume"].copy()
+    # Make all coins strictly rising so EMA fast > EMA slow whenever warmed up
+    rising = np.linspace(100.0, 220.0, len(close))[:, None] * np.ones((1, close.shape[1]))
+    close[:] = rising
+    close.iloc[50, 0] = np.nan  # Single missing BTC bar at bar 50
+    qv[:] = 1e8
+    qv.iloc[50, 0] = np.nan
+
+    mask = causal_rolling_top_n_mask(qv, close, lookback_bars=5, top_n=6, min_valid_frac=0.6)
+    w = f4_ema_trend_btc_weights(
+        close, mask, fast_span=4, slow_span=10, btc_fast=4, btc_slow=20, vol_window=5
+    )
+    # Initial warmup: bars 0..18 must be 0.0 (btc_slow=20 requires 20 consecutive valid bars)
+    assert (w.iloc[:19].to_numpy() == 0.0).all()
+    # After NaN at bar 50, bars 50..69 (19 consecutive post-gap bars) must remain 0.0
+    assert (w.iloc[50:70].to_numpy() == 0.0).all()
+    assert (w.iloc[70:].sum(axis=1) > 0.0).any()
+
+    # 2) Zero-volatility flat asset produces zero RuntimeWarning (checked under pytest -W error)
+    flat_close = pd.DataFrame(100.0, index=close.index[:60], columns=["BTCUSDT", "ETHUSDT"])
+    flat_high = flat_close * 1.01
+    flat_low = flat_close * 0.99
+    flat_mask = pd.DataFrame(True, index=flat_close.index, columns=flat_close.columns)
+    w_flat_f4 = f4_ema_trend_btc_weights(
+        flat_close, flat_mask, fast_span=3, slow_span=10, btc_fast=3, btc_slow=10, vol_window=5
+    )
+    w_flat_f3 = f3_donchian_breakout_weights(
+        flat_close, flat_high, flat_low, flat_mask, entry_window=10, exit_window=5, vol_window=5
+    )
+    assert (w_flat_f4.to_numpy() == 0.0).all()
+    assert (w_flat_f3.to_numpy() == 0.0).all()
+
+    # 3) Halted volume at bar t is excluded; mean quote_volume divides by lookback_bars
+    idx = pd.date_range("2024-01-01", periods=5, freq="1D", tz="UTC")
+    qv_test = pd.DataFrame(
+        {
+            "FULL": [100.0, 100.0, 100.0, 100.0, 100.0],  # mean over 5 = 100
+            "GAPPED": [np.nan, 110.0, 110.0, 110.0, 110.0],  # mean over 5 = 88 (< 100!)
+            "HALTED": [500.0, 500.0, 500.0, 500.0, 0.0],  # halted on bar t -> excluded!
+        },
+        index=idx,
+    )
+    cl_test = pd.DataFrame(10.0, index=idx, columns=qv_test.columns)
+    m_top1 = causal_rolling_top_n_mask(qv_test, cl_test, lookback_bars=5, top_n=1, min_valid_frac=0.8)
+    assert m_top1.iloc[-1]["FULL"]
+    assert not m_top1.iloc[-1]["GAPPED"]
+    assert not m_top1.iloc[-1]["HALTED"]
+
+
+def test_sleeve2_receipt_hashes_reflect_actual_config_and_risk_parameters() -> None:
+    day = build_sleeve2_paper_soak_day(
+        date_utc="2026-10-01",
+        input_cutoff_utc=1_790_812_800,
+        target_weights={"BTCUSDT": 0.2},
+        realized_pnl_vnd=10_000.0,
+        unrealized_pnl_vnd=0.0,
+        fees_vnd=1_000.0,
+        slippage_bps=5.0,
+        equity_vnd=250_010_000.0,
+    )
+    r_base = build_sleeve2_paper_soak_receipt([day], fee_bps=10.0, slippage_bps=5.0, max_coin=0.25)
+    r_fee = build_sleeve2_paper_soak_receipt([day], fee_bps=20.0, slippage_bps=5.0, max_coin=0.25)
+    r_risk = build_sleeve2_paper_soak_receipt([day], fee_bps=10.0, slippage_bps=5.0, max_coin=0.15)
+    assert r_base.config_sha256 != r_fee.config_sha256
+    assert r_base.risk_budget_sha256 != r_risk.risk_budget_sha256

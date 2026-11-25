@@ -107,16 +107,22 @@ def _weighted_mean(left: float, right: float, right_weight: float) -> float:
 def _log_abs_difference(left: float, right: float) -> float:
     """Compute ``log(abs(left-right))`` without overflowing subtraction."""
 
+    if left == right:
+        return -math.inf
     left_abs, right_abs = abs(left), abs(right)
     larger = max(left_abs, right_abs)
     smaller = min(left_abs, right_abs)
     if larger == 0.0:
         return -math.inf
-    # Same-sign equal values cancel exactly. Opposite-sign values are summed;
-    # the ratio form keeps this finite even when the raw sum would overflow.
-    if left * right >= 0.0 and left_abs == right_abs:
-        return -math.inf
-    return math.log(larger) + math.log1p(smaller / larger)
+    # Same-sign values subtract in magnitude; opposite-sign values add in
+    # magnitude. The ratio form avoids overflow when |left| + |right| > DBL_MAX.
+    same_sign = (left > 0.0 and right > 0.0) or (left < 0.0 and right < 0.0)
+    ratio = smaller / larger
+    if same_sign:
+        if ratio >= 1.0:
+            return math.log(abs(left - right))
+        return math.log(larger) + math.log1p(-ratio)
+    return math.log(larger) + math.log1p(ratio)
 
 
 def _log1pexp(value: float) -> float:

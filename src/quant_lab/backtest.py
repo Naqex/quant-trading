@@ -38,8 +38,26 @@ def run_backtest(
     turnover.iloc[0] = abs(position.iloc[0])
     cost_rate = (fee_bps + slippage_bps) / 10_000
     strategy_return = position * asset_return - turnover * cost_rate
-    equity = (1.0 + strategy_return).cumprod()
-    drawdown = equity / equity.cummax() - 1.0
+    equity = np.maximum(0.0, 1.0 + strategy_return).cumprod()
+    if (equity <= 0.0).any():
+        first_zero = int(np.flatnonzero(equity.to_numpy() <= 0.0)[0])
+        strategy_return = strategy_return.copy()
+        position = position.copy()
+        turnover = turnover.copy()
+        equity = equity.copy()
+        strategy_return.iloc[first_zero] = -1.0
+        equity.iloc[first_zero] = 0.0
+        if first_zero + 1 < len(equity):
+            position.iloc[first_zero + 1 :] = 0.0
+            turnover.iloc[first_zero + 1 :] = 0.0
+            strategy_return.iloc[first_zero + 1 :] = 0.0
+            equity.iloc[first_zero + 1 :] = 0.0
+    peak = equity.cummax()
+    drawdown = pd.Series(
+        np.where(peak > 0.0, equity / peak - 1.0, -1.0),
+        index=close.index,
+        dtype=float,
+    )
 
     return pd.DataFrame(
         {

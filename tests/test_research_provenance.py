@@ -3,6 +3,7 @@ from argparse import Namespace
 
 import numpy as np
 import pandas as pd
+import pytest
 
 from quant_lab import research
 
@@ -57,3 +58,53 @@ def test_quant_research_writes_provenance_sidecar_and_row_digest(tmp_path, monke
 
     portfolio = pd.read_csv(report_directory / "portfolio_test.csv")
     assert json.loads(portfolio["data_provenance"].iloc[0])["BTCUSDT"]["sha256"] == dataset["sha256"]
+
+
+def test_evaluate_portfolio_preserves_active_sleeve_returns_when_peer_has_gap_or_delists(
+    tmp_path, monkeypatch
+) -> None:
+    data_directory = tmp_path / "data"
+    data_directory.mkdir()
+    timestamps = pd.date_range("2023-01-01", periods=10, freq="D", tz="UTC")
+    btc_close = np.array([100.0, 100.0, 100.0, 100.0, 100.0, 100.0, 100.0, 110.0, 121.0, 133.1])
+    btc = pd.DataFrame(
+        {
+            "open_time": timestamps,
+            "open": btc_close,
+            "high": btc_close * 1.01,
+            "low": btc_close * 0.99,
+            "close": btc_close,
+            "volume": 1_000.0,
+            "close_time": timestamps + pd.to_timedelta(23, unit="h"),
+        }
+    )
+    btc.to_csv(data_directory / "BTCUSDT_1d.csv", index=False)
+
+    # SOL misses day 7 and ends after day 8 (delists before days 9-10)
+    sol_idx = [0, 1, 2, 3, 4, 5, 7]
+    sol_close = np.full(len(sol_idx), 50.0)
+    sol = pd.DataFrame(
+        {
+            "open_time": timestamps[sol_idx],
+            "open": sol_close,
+            "high": sol_close * 1.01,
+            "low": sol_close * 0.99,
+            "close": sol_close,
+            "volume": 500.0,
+            "close_time": timestamps[sol_idx] + pd.to_timedelta(23, unit="h"),
+        }
+    )
+    sol.to_csv(data_directory / "SOLUSDT_1d.csv", index=False)
+    monkeypatch.setattr(research, "DATA_DIRECTORY", data_directory)
+
+    result = research.evaluate_portfolio(
+        ["BTCUSDT", "SOLUSDT"],
+        "buy_and_hold",
+        research.STRATEGIES["buy_and_hold"],
+        test_start="2023-01-06",
+        fee_bps=0.0,
+        slippage_bps=0.0,
+    )
+    # Must span full BTC test window through 2023-01-10 and capture BTC's +33.1% gain (50% weight -> +16.55%)
+    assert result["end"] == "2023-01-10"
+    assert result["total_return"] == pytest.approx(0.1655, rel=1e-4)

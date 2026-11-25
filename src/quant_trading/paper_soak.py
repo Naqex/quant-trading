@@ -15,7 +15,7 @@ import math
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass
-from datetime import date, timedelta
+from datetime import UTC, date, datetime, time, timedelta
 from typing import Any, Literal
 
 PAPER_SOAK_SCHEMA = "paper-soak-evidence-v1"
@@ -116,8 +116,16 @@ class PaperSoakDay:
             raise PaperSoakError("date_utc must use canonical YYYY-MM-DD")
         object.__setattr__(self, "date_utc", date_value)
         _strict_int(self.input_cutoff_utc, "input_cutoff_utc")
+        try:
+            cutoff_date = datetime.fromtimestamp(self.input_cutoff_utc, tz=UTC).date()
+        except (OverflowError, OSError, ValueError) as exc:
+            raise PaperSoakError("input_cutoff_utc must be a valid UTC unix timestamp") from exc
+        if cutoff_date != parsed_date:
+            raise PaperSoakError("input_cutoff_utc UTC calendar date must match date_utc")
         for name in ("candidate_count", "paper_intents", "fills"):
             _strict_int(getattr(self, name), name)
+        if self.paper_intents > self.candidate_count:
+            raise PaperSoakError("paper_intents cannot exceed candidate_count")
         for name in ("realized_pnl_vnd", "unrealized_pnl_vnd"):
             object.__setattr__(self, name, _finite(getattr(self, name), name))
         for name in ("fees_vnd", "slippage_bps"):
@@ -303,12 +311,23 @@ class PaperSoakReceipt:
             raise PaperSoakError("paper-soak evidence cannot exceed 60 observed days")
         if self.status not in {"NOT_RUN", "OBSERVED", "ACCEPTED", "REJECTED"}:
             raise PaperSoakError("status is unsupported")
-        if self.status == "NOT_RUN" and (days or checks):
-            raise PaperSoakError("NOT_RUN evidence cannot contain observations")
-        if self.status == "NOT_RUN" and any(
-            value is not None for value in (self.run_id, self.attempt_no, self.fence_token)
-        ):
-            raise PaperSoakError("NOT_RUN evidence cannot contain a run identity")
+        if self.status == "NOT_RUN":
+            if days or checks:
+                raise PaperSoakError("NOT_RUN evidence cannot contain observations")
+            if any(
+                value is not None
+                for value in (
+                    self.run_id,
+                    self.attempt_no,
+                    self.fence_token,
+                    self.config_sha256,
+                    self.strategy_sha256,
+                    self.risk_budget_sha256,
+                )
+            ):
+                raise PaperSoakError("NOT_RUN evidence cannot contain a run identity or hashes")
+            if self.owner_reviewed:
+                raise PaperSoakError("NOT_RUN evidence cannot be marked owner_reviewed")
         if self.run_id is not None:
             object.__setattr__(self, "run_id", _text(self.run_id, "run_id", maximum=256))
         if self.attempt_no is not None:
@@ -327,9 +346,31 @@ class PaperSoakReceipt:
                 _sha256(value, name)
         if type(self.owner_reviewed) is not bool:
             raise PaperSoakError("owner_reviewed must be a boolean")
+        if days and checks:
+            win_start = int(
+                datetime.combine(date.fromisoformat(days[0].date_utc), time.min, tzinfo=UTC).timestamp()
+            )
+            win_end = int(
+                datetime.combine(
+                    date.fromisoformat(days[-1].date_utc), time(23, 59, 59), tzinfo=UTC
+                ).timestamp()
+            )
+            for check in checks:
+                if not win_start <= check.observed_at_utc <= win_end:
+                    raise PaperSoakError("restart check observed_at_utc must fall within soak window")
+        if self.attempt_no is not None and any(check.attempt_no != self.attempt_no for check in checks):
+            raise PaperSoakError("restart check attempt_no must match receipt attempt_no")
+        normalized_level = _text(self.evidence_level, "evidence_level", maximum=64)
         if self.status == "ACCEPTED":
             if len(days) < MINIMUM_SOAK_DAYS or not self.owner_reviewed:
                 raise PaperSoakError("ACCEPTED evidence requires 30 days and explicit owner review")
+            if normalized_level in _SYNTHETIC_EVIDENCE_LEVELS:
+                raise PaperSoakError("ACCEPTED evidence cannot use synthetic evidence_level")
+            expected_span = (
+                date.fromisoformat(days[-1].date_utc) - date.fromisoformat(days[0].date_utc)
+            ).days + 1
+            if expected_span != len(days):
+                raise PaperSoakError("ACCEPTED evidence requires contiguous UTC calendar days")
             if self.run_id is None or self.attempt_no is None or self.fence_token is None:
                 raise PaperSoakError("ACCEPTED evidence requires a complete run identity")
             if any(value is None for value in identity_hashes):
@@ -339,6 +380,8 @@ class PaperSoakReceipt:
                 for day in days
             ):
                 raise PaperSoakError("ACCEPTED evidence requires healthy reconciled days")
+            if any(day.fills > day.paper_intents for day in days):
+                raise PaperSoakError("ACCEPTED evidence cannot contain fills exceeding paper_intents")
             if not checks or any(
                 check.status != "passed" or check.duplicate_intents != 0 for check in checks
             ):
@@ -347,7 +390,7 @@ class PaperSoakReceipt:
             raise PaperSoakError("OBSERVED evidence requires at least one day")
         object.__setattr__(self, "daily_reconciliation", days)
         object.__setattr__(self, "restart_checks", checks)
-        object.__setattr__(self, "evidence_level", _text(self.evidence_level, "evidence_level", maximum=64))
+        object.__setattr__(self, "evidence_level", normalized_level)
         expected = _hash(_core(self))
         if self.receipt_sha256 is not None and self.receipt_sha256 != expected:
             raise PaperSoakError("receipt_sha256 does not match canonical receipt")
@@ -578,6 +621,8 @@ def audit_paper_soak_receipt(
 
     if receipt.status == "REJECTED":
         hard_blockers.append("receipt_status_rejected")
+    if receipt.status == "ACCEPTED" and receipt.evidence_level in _SYNTHETIC_EVIDENCE_LEVELS:
+        hard_blockers.append(f"accepted_synthetic_evidence_level:{receipt.evidence_level}")
     if mismatch_days > 0:
         hard_blockers.append(f"reconciliation_mismatch_days:{mismatch_days}")
     if unhealthy_days > 0:

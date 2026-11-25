@@ -105,16 +105,18 @@ def _metrics_with_boundary(
     period["equity"] = (1.0 + period["strategy_return"]).cumprod()
     period["drawdown"] = period["equity"] / period["equity"].cummax() - 1.0
     metrics = dict(performance_metrics(period))
-    # The first test row can be the entry from a signal calculated on the last
-    # training close.  performance_metrics cannot see the preceding row, so
-    # restore that single boundary entry without changing test returns.
-    boundary_entry = (
-        test_start > 0
-        and result["position"].iloc[test_start] > 0.0
-        and result["position"].iloc[test_start - 1] <= 0.0
+    # Compute OOS entries from the untruncated position series so a genuine
+    # 0 -> >0 boundary transition is counted once (never doubled) and a
+    # carried-in position (>0 -> >0) is never counted as a phantom OOS entry.
+    pos = result["position"]
+    pos_prev = pos.shift(1, fill_value=0.0)
+    oos_entries = int(
+        (
+            (pos.iloc[test_start : test_end + 1] > 0.0)
+            & (pos_prev.iloc[test_start : test_end + 1] <= 0.0)
+        ).sum()
     )
-    if boundary_entry:
-        metrics["entries"] = int(metrics["entries"]) + 1
+    metrics["entries"] = oos_entries
     return {
         key: (None if isinstance(value, float) and not math.isfinite(value) else value)
         for key, value in metrics.items()

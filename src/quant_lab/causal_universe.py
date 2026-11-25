@@ -13,6 +13,7 @@ import hashlib
 import json
 import math
 from collections.abc import Mapping
+from datetime import date
 from typing import Any, Literal
 
 import numpy as np
@@ -124,11 +125,17 @@ def causal_rolling_top_n_mask(
     for t in range(lookback_bars - 1, n_t):
         win = qv[t - lookback_bars + 1 : t + 1]
         valid_cnt = np.sum(np.isfinite(win) & (win > 0.0), axis=0)
-        cur_ok = np.isfinite(cl[t]) & (cl[t] > 0.0) & (valid_cnt >= min_req)
+        cur_ok = (
+            np.isfinite(cl[t])
+            & (cl[t] > 0.0)
+            & np.isfinite(qv[t])
+            & (qv[t] > 0.0)
+            & (valid_cnt >= min_req)
+        )
         if not np.any(cur_ok):
             continue
         safe = np.where(np.isfinite(win) & (win > 0.0), win, 0.0)
-        mean_qv = np.where(cur_ok, np.sum(safe, axis=0) / np.maximum(1, valid_cnt), -1.0)
+        mean_qv = np.where(cur_ok, np.sum(safe, axis=0) / float(lookback_bars), -1.0)
         elig_idx = np.flatnonzero(cur_ok)
         if len(elig_idx) <= top_n:
             mask[t, elig_idx] = True
@@ -145,13 +152,17 @@ def _causal_ema_matrix(closes: np.ndarray, span: int) -> np.ndarray:
     alpha = 2.0 / (span + 1.0)
     for j in range(n_k):
         prev = np.nan
+        valid_streak = 0
         for t in range(n_t):
             c = closes[t, j]
             if not np.isfinite(c) or c <= 0.0:
                 prev = np.nan
+                valid_streak = 0
                 continue
             prev = c if not np.isfinite(prev) else (alpha * c + (1.0 - alpha) * prev)
-            out[t, j] = prev
+            valid_streak += 1
+            if valid_streak >= span:
+                out[t, j] = prev
     return out
 
 
@@ -248,7 +259,9 @@ def f4_ema_trend_btc_weights(
     vol = _causal_rolling_vol(cl, vol_window)
 
     vt_bar = target_ann_vol / math.sqrt(bars_per_year)
-    inv_vol = np.where(np.isfinite(vol) & (vol > 1e-6), vt_bar / vol, 0.0)
+    valid_vol = np.isfinite(vol) & (vol > 1e-6)
+    safe_vol = np.where(valid_vol, vol, 1.0)
+    inv_vol = np.where(valid_vol, vt_bar / safe_vol, 0.0)
     n_elig = np.maximum(1, elig.sum(axis=1, keepdims=True))
     btc_bull = (np.isfinite(btc_ef) & np.isfinite(btc_es) & (btc_ef > btc_es))[:, None]
 
@@ -303,7 +316,9 @@ def f3_donchian_breakout_weights(
 
     vol = _causal_rolling_vol(cl, vol_window)
     vt_bar = target_ann_vol / math.sqrt(bars_per_year)
-    inv_vol = np.where(np.isfinite(vol) & (vol > 1e-6), vt_bar / vol, 0.0)
+    valid_vol = np.isfinite(vol) & (vol > 1e-6)
+    safe_vol = np.where(valid_vol, vol, 1.0)
+    inv_vol = np.where(valid_vol, vt_bar / safe_vol, 0.0)
 
     state = np.zeros(n_k, dtype=bool)
     raw = np.zeros((n_t, n_k), dtype=np.float64)
@@ -375,24 +390,48 @@ def run_multi_asset_spot_backtest(
     valid_ret = np.isfinite(cl[1:]) & np.isfinite(cl[:-1]) & (cl[:-1] > 0.0) & (cl[1:] > 0.0)
     rets[1:][valid_ret] = cl[1:][valid_ret] / cl[:-1][valid_ret] - 1.0
 
-    # Strict causal shift: target_weights[t] becomes held[t+1]
-    held = np.zeros_like(tw)
-    held[1:] = tw[:-1]
+    # Strict causal shift: target_weights[t-1] is the intended weight entering bar t.
+    intended = np.zeros_like(tw)
+    intended[1:] = tw[:-1]
+    held = intended.copy()
     delist_w = np.zeros_like(tw)
     missing_next = (~valid_ret) & (tw[:-1] > 1e-12)
     delist_w[1:][missing_next] = tw[:-1][missing_next]
     held[1:][~valid_ret] = 0.0
 
-    prev = np.zeros_like(held)
-    prev[1:] = held[:-1]
-    turnover = np.sum(np.abs(held - prev), axis=1)
+    # Track post-return drifted weights entering bar t so constant-mix rebalancing
+    # pays true drift turnover and enter-then-delist bars pay both entry and exit.
+    gross = np.sum(held * rets, axis=1)
+    w_drift = np.zeros_like(held)
+    denom = 1.0 + gross[:-1]
+    alive_denom = denom > 1e-12
+    safe_denom = np.where(alive_denom, denom, 1.0)[:, None]
+    w_drift[1:] = np.where(
+        alive_denom[:, None],
+        held[:-1] * (1.0 + rets[:-1]) / safe_denom,
+        0.0,
+    )
+
+    turnover = np.sum(np.abs(intended - w_drift) + delist_w, axis=1)
     cost = turnover * ((fee_bps + slippage_bps) / 10_000.0) + np.sum(delist_w, axis=1) * (
         delist_haircut_bps / 10_000.0
     )
-    gross = np.sum(held * rets, axis=1)
     net = gross - cost
-    equity = np.cumprod(1.0 + net)
-    drawdown = equity / np.maximum.accumulate(np.r_[1.0, equity])[1:] - 1.0
+    equity = np.cumprod(np.maximum(0.0, 1.0 + net))
+    if (equity <= 0.0).any():
+        first_zero = int(np.flatnonzero(equity <= 0.0)[0])
+        net[first_zero] = -1.0
+        equity[first_zero] = 0.0
+        if first_zero + 1 < n_t:
+            held[first_zero + 1 :] = 0.0
+            gross[first_zero + 1 :] = 0.0
+            cost[first_zero + 1 :] = 0.0
+            turnover[first_zero + 1 :] = 0.0
+            delist_w[first_zero + 1 :] = 0.0
+            net[first_zero + 1 :] = 0.0
+            equity[first_zero + 1 :] = 0.0
+    peak = np.maximum.accumulate(np.r_[1.0, equity])[1:]
+    drawdown = np.where(peak > 0.0, equity / peak - 1.0, -1.0)
     gross_exposure = np.sum(held, axis=1)
 
     return pd.DataFrame(
@@ -476,6 +515,12 @@ def build_sleeve2_paper_soak_receipt(
     attempt_no: int = 1,
     fence_token: str = "offline-prep-only",
     strategy_name: str = "F4_4H_EMA_24_120_BTC",
+    universe_name: str = "causal_top15_30d_qv",
+    fee_bps: float = 10.0,
+    slippage_bps: float = 5.0,
+    max_gross: float = 1.0,
+    max_coin: float = 0.25,
+    dd_kill_pct: float = 12.0,
     owner_reviewed: bool = False,
     evidence_level: str = "offline_soak_evidence",
 ) -> PaperSoakReceipt:
@@ -486,21 +531,56 @@ def build_sleeve2_paper_soak_receipt(
         return PaperSoakReceipt()
     if not isinstance(strategy_name, str) or not strategy_name.strip():
         raise PaperSoakError("strategy_name must be a non-empty string.")
+    if not isinstance(universe_name, str) or not universe_name.strip():
+        raise PaperSoakError("universe_name must be a non-empty string.")
+    fee_bps = _validate_finite_float(fee_bps, "fee_bps", minimum=0.0)
+    slippage_bps = _validate_finite_float(slippage_bps, "slippage_bps", minimum=0.0)
+    max_gross = _validate_finite_float(max_gross, "max_gross", strictly_positive=True)
+    max_coin = _validate_finite_float(max_coin, "max_coin", strictly_positive=True)
+    dd_kill_pct = _validate_finite_float(dd_kill_pct, "dd_kill_pct", strictly_positive=True)
+    if max_gross > 1.0 or max_coin > max_gross or dd_kill_pct > 100.0:
+        raise PaperSoakError(
+            "Risk budget must satisfy 0 < max_coin <= max_gross <= 1.0 and dd_kill_pct <= 100."
+        )
 
-    cfg_sha = _canonical_sha256({"universe": "causal_top15_30d_qv", "fee_bps": 10.0, "slippage_bps": 5.0})
-    strat_sha = _canonical_sha256({"strategy": strategy_name.strip(), "spot_only": True, "leverage": 1.0})
-    risk_sha = _canonical_sha256({"max_gross": 1.0, "max_coin": 0.25, "dd_kill_pct": 12.0})
-
-    has_hard_failure = any(d.reconciliation_status == "mismatch" for d in days) or any(
-        c.status == "failed" or c.duplicate_intents > 0 for c in restart_checks
+    cfg_sha = _canonical_sha256(
+        {"universe": universe_name.strip(), "fee_bps": fee_bps, "slippage_bps": slippage_bps}
     )
-    all_ok = all(d.reconciliation_status == "reconciled" and d.health_status == "healthy" for d in days)
+    strat_sha = _canonical_sha256({"strategy": strategy_name.strip(), "spot_only": True, "leverage": 1.0})
+    risk_sha = _canonical_sha256(
+        {"max_gross": max_gross, "max_coin": max_coin, "dd_kill_pct": dd_kill_pct}
+    )
+
+    synthetic_levels = {"template_only", "offline_fixture", "offline_smoke_fixture"}
+    ordered_dates = [d.date_utc for d in days]
+    is_contiguous = (
+        (date.fromisoformat(ordered_dates[-1]) - date.fromisoformat(ordered_dates[0])).days + 1
+        == len(ordered_dates)
+    )
+    has_hard_failure = (
+        any(d.reconciliation_status != "reconciled" or d.fills > d.paper_intents for d in days)
+        or any(c.status != "passed" or c.duplicate_intents > 0 for c in restart_checks)
+    )
+    all_ok = all(
+        d.reconciliation_status == "reconciled"
+        and d.health_status == "healthy"
+        and d.fills <= d.paper_intents
+        for d in days
+    )
     restarts_ok = bool(restart_checks) and all(
         c.status == "passed" and c.duplicate_intents == 0 for c in restart_checks
     )
+    can_accept = (
+        len(days) >= MINIMUM_SOAK_DAYS
+        and is_contiguous
+        and all_ok
+        and restarts_ok
+        and owner_reviewed
+        and evidence_level not in synthetic_levels
+    )
     if has_hard_failure:
         status: Literal["OBSERVED", "ACCEPTED", "REJECTED"] = "REJECTED"
-    elif len(days) >= MINIMUM_SOAK_DAYS and all_ok and restarts_ok and owner_reviewed:
+    elif can_accept:
         status = "ACCEPTED"
     elif len(days) >= MINIMUM_SOAK_DAYS and owner_reviewed:
         status = "REJECTED"
@@ -621,6 +701,9 @@ def run_sleeve2_offline_smoke(
         attempt_no=1,
         fence_token="offline-smoke-only",
         strategy_name=strategy_name,
+        universe_name="synthetic_top4_30b_qv",
+        fee_bps=fee_bps,
+        slippage_bps=slippage_bps,
         owner_reviewed=False,
         evidence_level="offline_smoke_fixture",
     )

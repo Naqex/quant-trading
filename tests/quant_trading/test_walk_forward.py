@@ -104,15 +104,31 @@ def test_adverse_cost_stress_changes_turnover_result() -> None:
     assert stressed.aggregate_metrics["fold_count"] == 6
 
 
-def test_boundary_entry_is_counted_in_each_oos_window() -> None:
-    receipt = run_walk_forward_stress(
-        _close(70),
+def test_boundary_entry_is_counted_once_and_carried_in_position_is_not_recounted() -> None:
+    close = _close(70)
+    # Carried-in always-on position (1 -> 1 across every fold boundary): 0 new OOS entries
+    carried = run_walk_forward_stress(
+        close,
         lambda history: pd.Series(1.0, index=history.index),
         strategy_id="always-on-v1",
         config=_config(minimum_folds=2),
     )
-    baseline = receipt.cases[0]
-    assert all(fold.metrics["entries"] == 1 for fold in baseline.folds)
+    assert all(fold.metrics["entries"] == 0 for fold in carried.cases[0].folds)
+
+    # Genuine 0 -> 1 boundary entry: signal flips on bar 19 (last train bar of fold 0),
+    # so position enters on bar 20 (test_start of fold 0) and stays invested in fold 1+.
+    boundary_ts = close.index[19]
+    boundary = run_walk_forward_stress(
+        close,
+        lambda history: pd.Series(
+            (history.index >= boundary_ts).astype(float), index=history.index, dtype=float
+        ),
+        strategy_id="boundary-entry-v1",
+        config=_config(minimum_folds=2),
+    )
+    fold_entries = [fold.metrics["entries"] for fold in boundary.cases[0].folds]
+    assert fold_entries[0] == 1
+    assert all(count == 0 for count in fold_entries[1:])
 
 
 @pytest.mark.parametrize(

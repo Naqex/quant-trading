@@ -5,6 +5,7 @@ import json
 from collections.abc import Callable
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 
 from quant_lab.backtest import apply_volatility_target, run_backtest
@@ -145,28 +146,45 @@ def evaluate_portfolio(
         result = run_backtest(close, signal, fee_bps, slippage_bps)
         sleeve_results.append(result.loc[result.index >= pd.Timestamp(test_start, tz="UTC")])
 
-    common_index = sleeve_results[0].index
+    union_index = sleeve_results[0].index
     for result in sleeve_results[1:]:
-        common_index = common_index.intersection(result.index)
-    if common_index.empty:
-        raise ValueError("Portfolio sleeves have no common dates.")
+        union_index = union_index.union(result.index)
+    union_index = union_index.sort_values()
+    if union_index.empty:
+        raise ValueError("Portfolio sleeves have no dates in the test period.")
 
     sleeve_equities = pd.concat(
-        [(1 + result.loc[common_index, "strategy_return"]).cumprod() for result in sleeve_results],
+        [
+            (1.0 + result["strategy_return"].reindex(union_index, fill_value=0.0)).clip(lower=0.0).cumprod()
+            for result in sleeve_results
+        ],
         axis=1,
     )
     portfolio_equity = sleeve_equities.mean(axis=1)
-    portfolio_return = portfolio_equity.pct_change().fillna(portfolio_equity.iloc[0] - 1)
+    prev_equity = portfolio_equity.shift(1, fill_value=1.0)
+    portfolio_return = pd.Series(
+        np.where(prev_equity > 0.0, portfolio_equity / prev_equity - 1.0, 0.0),
+        index=union_index,
+        dtype=float,
+    )
+    peak = portfolio_equity.cummax()
+    portfolio_drawdown = pd.Series(
+        np.where(peak > 0.0, portfolio_equity / peak - 1.0, -1.0),
+        index=union_index,
+        dtype=float,
+    )
     portfolio = pd.DataFrame(
         {
             "strategy_return": portfolio_return,
             "equity": portfolio_equity,
-            "drawdown": portfolio_equity / portfolio_equity.cummax() - 1,
+            "drawdown": portfolio_drawdown,
             "position": pd.concat(
-                [result.loc[common_index, "position"] for result in sleeve_results], axis=1
+                [result["position"].reindex(union_index, fill_value=0.0) for result in sleeve_results],
+                axis=1,
             ).mean(axis=1),
             "turnover": pd.concat(
-                [result.loc[common_index, "turnover"] for result in sleeve_results], axis=1
+                [result["turnover"].reindex(union_index, fill_value=0.0) for result in sleeve_results],
+                axis=1,
             ).mean(axis=1),
         }
     )
@@ -174,8 +192,8 @@ def evaluate_portfolio(
         name = f"{name}_vol{int(volatility_target * 100)}"
     return {
         "strategy": name,
-        "start": common_index.min().date().isoformat(),
-        "end": common_index.max().date().isoformat(),
+        "start": union_index.min().date().isoformat(),
+        "end": union_index.max().date().isoformat(),
         "data_provenance": json.dumps(provenance_by_symbol, sort_keys=True, separators=(",", ":")),
         **performance_metrics(portfolio),
     }

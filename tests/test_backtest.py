@@ -89,3 +89,21 @@ def test_performance_metrics_expose_downside_and_tail_risk() -> None:
     assert metrics["expected_shortfall_95"] <= 0
     assert metrics["worst_period_return"] < 0
     assert metrics["max_loss_streak"] == 2
+
+
+def test_backtest_enforces_zero_bankruptcy_floor_and_metrics_stay_finite() -> None:
+    close = pd.Series([100.0, 100.0, 0.5, 50.0])
+    signal = pd.Series([0.0, 1.0, 1.0, 1.0])
+
+    # Bar 2: enters 1.0 (turnover=1.0, 200 bps cost) and drops -99.5% -> raw -1.015 -> floored at -1.0
+    result = run_backtest(close, signal, fee_bps=150.0, slippage_bps=50.0)
+    assert result["equity"].iloc[2] == 0.0
+    assert result["equity"].iloc[3] == 0.0
+    assert result["position"].iloc[3] == 0.0
+    assert (result["equity"] >= 0.0).all()
+    assert result["drawdown"].iloc[2] == pytest.approx(-1.0)
+    assert np.isfinite(result["drawdown"].to_numpy()).all()
+
+    metrics = performance_metrics(result, periods_per_year=365)
+    assert metrics["total_return"] == pytest.approx(-1.0)
+    assert metrics["cagr"] == pytest.approx(-1.0)
