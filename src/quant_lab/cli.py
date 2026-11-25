@@ -370,7 +370,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     stress = commands.add_parser(
         "stress-report",
-        help="Run purged WFO, 10/20/35 bps fee ladder, +-20% plateau, and block-bootstrap CI offline",
+        help="Run purged WFO, 10/20/35 bps fee ladder, +-20%% plateau, and block-bootstrap CI offline",
     )
     stress.add_argument("--input", help="Path to local CSV/Parquet OHLCV file")
     stress.add_argument(

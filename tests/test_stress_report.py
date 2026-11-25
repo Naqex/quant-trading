@@ -147,6 +147,7 @@ def test_stress_report_cli_smoke_csv_parquet_markdown_and_fail_exit(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     parser = build_parser()
+    assert "stress-report" in parser.format_help()
     md_path = tmp_path / "stress_summary.md"
 
     # 1) --smoke + --json + --out-md -> PASS (exit 0)
