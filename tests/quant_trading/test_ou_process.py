@@ -6,6 +6,7 @@ from quant_trading.ou_process import (
     OUConfig,
     OUObservation,
     OUProcessError,
+    _profile_at_kappa,
     filter_ou_process,
     fit_ou_process,
 )
@@ -120,3 +121,29 @@ def test_ou_rejects_unrepresentable_timestamp_gap_cleanly() -> None:
     ]
     with pytest.raises(OUProcessError, match="representable as a finite float"):
         fit_ou_process(observations, config=OUConfig(min_observations=3))
+
+
+def test_ou_fit_applies_exact_rescaling_jacobian_to_log_likelihood() -> None:
+    base = _synthetic_observations("spread")
+    factor = 100.0
+    scaled = [
+        OUObservation(
+            event_time=item.event_time,
+            known_at=item.known_at,
+            value=item.value * factor,
+            series_kind=item.series_kind,
+        )
+        for item in base
+    ]
+    fit_base = fit_ou_process(base)
+    fit_scaled = fit_ou_process(scaled)
+
+    raw_values = [item.value for item in scaled]
+    dts = [float(b.event_time - a.event_time) for a, b in zip(scaled, scaled[1:], strict=False)]
+    direct = _profile_at_kappa(fit_scaled.kappa, raw_values, dts)
+    assert direct is not None
+    assert fit_scaled.log_likelihood == pytest.approx(direct[2], rel=1e-9)
+    assert fit_scaled.log_likelihood == pytest.approx(
+        fit_base.log_likelihood - (len(base) - 1) * math.log(factor),
+        rel=1e-6,
+    )

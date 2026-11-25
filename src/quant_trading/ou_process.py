@@ -487,9 +487,10 @@ def fit_ou_process(
     ]
     best_log, best_profile = max(refined, key=lambda item: item[1][2])
     kappa = math.exp(best_log)
-    mean_level_norm, diffusion_norm, log_likelihood = best_profile
+    mean_level_norm, diffusion_norm, log_likelihood_norm = best_profile
     mean_level = mean_level_norm * scale
     diffusion = diffusion_norm * scale * scale
+    log_likelihood = log_likelihood_norm - (len(values) - 1) * math.log(scale)
     if not all(math.isfinite(value) for value in (mean_level, diffusion, log_likelihood)) or diffusion <= 0:
         raise OUProcessError("OU fit became non-finite after restoring data scale")
     stationary_variance = diffusion / (2.0 * kappa)

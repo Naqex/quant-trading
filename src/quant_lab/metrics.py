@@ -22,9 +22,15 @@ def performance_metrics(backtest: pd.DataFrame, periods_per_year: int = 365) -> 
     if returns.empty:
         raise ValueError("Backtest has no returns.")
 
-    total_return = float(backtest["equity"].iloc[-1] - 1.0)
+    ending_equity = float(backtest["equity"].iloc[-1])
+    total_return = ending_equity - 1.0
     years = len(returns) / periods_per_year
-    cagr = float(backtest["equity"].iloc[-1] ** (1 / years) - 1) if years > 0 else math.nan
+    if years > 0 and ending_equity > 0.0:
+        cagr = float(ending_equity ** (1 / years) - 1)
+    elif years > 0 and ending_equity == 0.0:
+        cagr = -1.0
+    else:
+        cagr = math.nan
     volatility = float(returns.std(ddof=0) * np.sqrt(periods_per_year))
     downside = returns.clip(upper=0.0)
     downside_root_mean_square = float(np.sqrt(np.mean(np.square(downside))))

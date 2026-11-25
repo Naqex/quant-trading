@@ -30,9 +30,11 @@ Tải dữ liệu công khai từ Binance, rồi chạy backtest mẫu:
 ```powershell
 uv run quant-lab download --symbol BTCUSDT --start 2018-01-01
 uv run quant-lab backtest --symbol BTCUSDT --fast 50 --slow 200 --fee-bps 10 --slippage-bps 5
+uv run quant-lab soak-check --smoke --strategy f4 --days 5
 ```
 
-Download cần mạng, không cần API key. Báo cáo lưu tại `reports/`; dữ liệu và báo
+Download cần mạng, không cần API key; `soak-check` chạy hoàn toàn offline với
+`execution_capability = false` và không đặt lệnh. Báo cáo lưu tại `reports/`; dữ liệu và báo
 cáo local không phải source để commit.
 
 ## Bản đồ nghiên cứu

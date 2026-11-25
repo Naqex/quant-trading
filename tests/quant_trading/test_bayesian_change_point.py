@@ -1,10 +1,13 @@
 import json
+import math
 
 import pytest
 
 from quant_trading.bayesian_change_point import (
     BayesianChangePointError,
     BOCPDConfig,
+    _log_abs_difference,
+    _student_t_logpdf,
     run_bocpd,
 )
 
@@ -104,3 +107,23 @@ def test_empty_bocpd_result_is_valid_and_deny_only() -> None:
     assert result.execution_capability is False
     assert result.provider_access is False
     assert result.broker_access is False
+
+
+def test_log_abs_difference_and_student_t_logpdf_exact_for_same_sign_inputs() -> None:
+    assert _log_abs_difference(10.0, 9.0) == pytest.approx(0.0, abs=1e-12)
+    assert _log_abs_difference(-10.0, -9.0) == pytest.approx(0.0, abs=1e-12)
+    assert _log_abs_difference(10.0, -9.0) == pytest.approx(math.log(19.0), abs=1e-12)
+    assert _log_abs_difference(5.0, 5.0) == -math.inf
+    assert _log_abs_difference(1e300, -1e300) == pytest.approx(math.log(2.0) + 300.0 * math.log(10.0))
+
+    for value, mean in ((10.0, 9.0), (-10.0, -9.0), (10.0, -9.0)):
+        kappa, alpha, beta = 2.0, 3.0, 4.0
+        nu = 2.0 * alpha
+        scale_sq = beta * (kappa + 1.0) / (alpha * kappa)
+        expected = (
+            math.lgamma((nu + 1.0) / 2.0)
+            - math.lgamma(nu / 2.0)
+            - 0.5 * math.log(nu * math.pi * scale_sq)
+            - ((nu + 1.0) / 2.0) * math.log1p(((value - mean) ** 2) / (nu * scale_sq))
+        )
+        assert _student_t_logpdf(value, mean, kappa, alpha, beta) == pytest.approx(expected, rel=1e-12)

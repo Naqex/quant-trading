@@ -76,6 +76,14 @@ rollback độc lập:
   reference chạy qua cùng walk-forward, timing, fee/slippage và stress cases;
   receipt chỉ là accounting baseline, không phải permutation test hay edge
   claim. Purged OOS vẫn cần contract horizon/purge/embargo riêng.
+- `quant_trading.paper_soak`: hợp đồng receipt paper-soak `PREP_ONLY_OFFLINE`
+  và `audit_paper_soak_receipt` kiểm tra tính liên tục lịch UTC, đối soát
+  fills/intents, ngưỡng slippage, kiểm tra restart không trùng lệnh và khóa
+  mọi capability ở `false`.
+- `quant_lab.causal_universe`: chọn vũ trụ Top-N theo dollar-volume cuốn chiếu
+  thuần nhân quả (không survivorship bias, không forward-fill trước niêm yết),
+  chiến lược Sleeve #2 (`F4` EMA + BTC filter, `F3` Donchian), backtest đa tài
+  sản `t -> t+1` có delisting haircut và pipeline smoke offline.
 
 Các primitive này chỉ nhận fixture đã capture, không gọi provider/broker/network
 và luôn giữ `execution_capability=false`. BOCPD/change-point, regime label,
@@ -102,6 +110,13 @@ Chạy chiến lược với 10 điểm cơ bản phí và 5 điểm cơ bản t
 
 ```powershell
 uv run quant-lab backtest --symbol BTCUSDT --fast 50 --slow 200 --fee-bps 10 --slippage-bps 5
+```
+
+Chạy kiểm tra sức khỏe/đối soát paper-soak offline (không mạng, không API key, `OrderSend = 0`):
+
+```powershell
+uv run quant-lab soak-check --smoke --strategy f4 --days 5
+uv run quant-lab soak-check --receipt path/to/paper_soak_receipt.json --max-slippage-bps 15
 ```
 
 Kết quả được in ra màn hình và lưu trong `reports/`.

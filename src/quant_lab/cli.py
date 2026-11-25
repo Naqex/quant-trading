@@ -1,14 +1,22 @@
 from __future__ import annotations
 
 import argparse
+import json
 from pathlib import Path
 
 import pandas as pd
 
 from quant_lab.backtest import run_backtest
+from quant_lab.causal_universe import run_sleeve2_offline_smoke
 from quant_lab.data import download_binance_klines, load_candles, save_candles
 from quant_lab.metrics import performance_metrics
 from quant_lab.strategies import buy_and_hold_signal, moving_average_trend_signal
+from quant_trading.paper_soak import (
+    PaperSoakError,
+    PaperSoakHealthReport,
+    PaperSoakReceipt,
+    audit_paper_soak_receipt,
+)
 
 DATA_DIRECTORY = Path("data/raw")
 REPORT_DIRECTORY = Path("reports")
@@ -70,6 +78,96 @@ def backtest_command(args: argparse.Namespace) -> None:
     print(f"Reports saved to {REPORT_DIRECTORY}")
 
 
+def _print_soak_health(report: PaperSoakHealthReport) -> None:
+    print("\nPaper-soak health & reconciliation report (PREP_ONLY_OFFLINE)")
+    print(f"  verdict                : {report.verdict}")
+    print(f"  receipt_status         : {report.receipt_status}")
+    print(f"  evidence_level         : {report.evidence_level}")
+    print(f"  observed_days          : {report.observed_days} (gaps: {report.calendar_gap_days})")
+    print(
+        f"  healthy_reconciled     : {report.healthy_reconciled_days}/{report.observed_days}"
+        f" (unhealthy: {report.unhealthy_days}, mismatch: {report.mismatch_days})"
+    )
+    print(f"  intents / fills        : {report.total_paper_intents} / {report.total_fills}")
+    print(
+        f"  restarts_passed        : {report.restart_checks_passed}/{report.restart_checks_total}"
+        f" (duplicate_intents: {report.total_duplicate_intents})"
+    )
+    print(f"  realized_pnl_vnd       : {report.total_realized_pnl_vnd:,.2f}")
+    print(f"  fees_vnd               : {report.total_fees_vnd:,.2f}")
+    if report.max_observed_slippage_bps is not None:
+        print(
+            f"  slippage_bps (avg/max) : {report.mean_slippage_bps:.2f}"
+            f" / {report.max_observed_slippage_bps:.2f}"
+        )
+    print(
+        f"  capabilities           : execution={report.execution_capability},"
+        f" promotion={report.promotion_allowed}, broker={report.broker_access}"
+    )
+    if report.blockers:
+        print(f"  blockers               : {', '.join(report.blockers)}")
+    if report.warnings:
+        print(f"  warnings               : {', '.join(report.warnings)}")
+    print(f"  receipt_sha256         : {report.receipt_sha256}")
+    print(f"  report_sha256          : {report.report_sha256}")
+
+
+def soak_check_command(args: argparse.Namespace) -> None:
+    if bool(args.receipt) == bool(args.smoke):
+        raise SystemExit("Specify exactly one of --receipt PATH or --smoke.")
+
+    try:
+        if args.smoke:
+            smoke = run_sleeve2_offline_smoke(
+                strategy=args.strategy,
+                soak_days=args.days,
+                seed=args.seed,
+            )
+            receipt: PaperSoakReceipt = smoke["receipt"]
+            if args.write_receipt is not None:
+                destination = Path(args.write_receipt)
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                destination.write_text(
+                    json.dumps(receipt.as_dict(), indent=2, sort_keys=True) + "\n",
+                    encoding="utf-8",
+                )
+            report = audit_paper_soak_receipt(
+                receipt,
+                max_slippage_bps=args.max_slippage_bps,
+                max_calendar_gap_days=args.max_gap_days,
+            )
+            if args.json:
+                payload = {
+                    "mode": "offline_smoke",
+                    "strategy": smoke["strategy"],
+                    "health_report": report.as_dict(),
+                }
+                print(json.dumps(payload, indent=2, sort_keys=True))
+            else:
+                _print_metrics(f"{smoke['strategy']} | offline synthetic smoke", smoke["backtest_metrics"])
+                _print_soak_health(report)
+        else:
+            source = Path(args.receipt)
+            if not source.exists():
+                raise SystemExit(f"Missing paper-soak receipt file: {source}")
+            raw = json.loads(source.read_text(encoding="utf-8"))
+            receipt = PaperSoakReceipt.from_mapping(raw)
+            report = audit_paper_soak_receipt(
+                receipt,
+                max_slippage_bps=args.max_slippage_bps,
+                max_calendar_gap_days=args.max_gap_days,
+            )
+            if args.json:
+                print(json.dumps(report.as_dict(), indent=2, sort_keys=True))
+            else:
+                _print_soak_health(report)
+    except (json.JSONDecodeError, PaperSoakError, ValueError) as exc:
+        raise SystemExit(f"Paper-soak check failed: {exc}") from exc
+
+    if report.verdict == "REJECTED":
+        raise SystemExit(f"Paper-soak receipt REJECTED: {', '.join(report.blockers)}")
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Transparent crypto quant research lab")
     commands = parser.add_subparsers(dest="command", required=True)
@@ -88,6 +186,25 @@ def build_parser() -> argparse.ArgumentParser:
     backtest.add_argument("--slippage-bps", type=float, default=5.0)
     backtest.add_argument("--train-ratio", type=float, default=0.7)
     backtest.set_defaults(handler=backtest_command)
+
+    soak_check = commands.add_parser(
+        "soak-check",
+        help="Audit a paper-soak receipt or run an offline Sleeve #2 smoke check (zero API keys)",
+    )
+    soak_check.add_argument("--receipt", help="Path to a PaperSoakReceipt JSON file to audit")
+    soak_check.add_argument(
+        "--smoke",
+        action="store_true",
+        help="Run deterministic offline synthetic Sleeve #2 smoke pipeline",
+    )
+    soak_check.add_argument("--strategy", choices=("f4", "f3"), default="f4")
+    soak_check.add_argument("--days", type=int, default=5)
+    soak_check.add_argument("--seed", type=int, default=2026)
+    soak_check.add_argument("--max-slippage-bps", type=float, default=None)
+    soak_check.add_argument("--max-gap-days", type=int, default=0)
+    soak_check.add_argument("--write-receipt", help="Optional JSON path to save generated smoke receipt")
+    soak_check.add_argument("--json", action="store_true", help="Emit canonical JSON output")
+    soak_check.set_defaults(handler=soak_check_command)
     return parser
 
 
