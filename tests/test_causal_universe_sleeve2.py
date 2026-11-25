@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -11,8 +13,11 @@ from quant_lab.causal_universe import (
     f3_donchian_breakout_weights,
     f4_ema_trend_btc_weights,
     run_multi_asset_spot_backtest,
+    run_sleeve2_offline_smoke,
 )
-from quant_trading.paper_soak import PaperSoakRestartCheck
+from quant_lab.cli import build_parser
+from quant_lab.metrics import performance_metrics
+from quant_trading.paper_soak import PaperSoakError, PaperSoakReceipt, PaperSoakRestartCheck
 
 
 def _synthetic_4h_panel(n_bars: int = 420, seed: int = 2026) -> dict[str, pd.DataFrame]:
@@ -131,3 +136,185 @@ def test_sleeve2_paper_soak_receipt_fail_closed() -> None:
     assert acc.promotion_allowed is False
     assert acc.broker_access is False
     assert acc.receipt_sha256 is not None and len(acc.receipt_sha256) == 64
+    assert PaperSoakReceipt.from_mapping(acc.as_dict()).receipt_sha256 == acc.receipt_sha256
+
+
+def test_causal_top_n_tie_breaking_is_column_order_invariant() -> None:
+    idx = pd.date_range("2024-01-01", periods=10, freq="4h", tz="UTC")
+    cols_a = ["ETHUSDT", "ADAUSDT", "BTCUSDT"]
+    cols_b = ["BTCUSDT", "ETHUSDT", "ADAUSDT"]
+    qv_a = pd.DataFrame(1e7, index=idx, columns=cols_a)
+    cl_a = pd.DataFrame(100.0, index=idx, columns=cols_a)
+
+    mask_a = causal_rolling_top_n_mask(qv_a, cl_a, lookback_bars=5, top_n=2)
+    mask_b = causal_rolling_top_n_mask(qv_a[cols_b], cl_a[cols_b], lookback_bars=5, top_n=2)
+
+    assert mask_a[cols_b].equals(mask_b)
+    assert mask_a.iloc[-1]["ADAUSDT"] and mask_a.iloc[-1]["BTCUSDT"]
+    assert not mask_a.iloc[-1]["ETHUSDT"]
+
+
+def test_causal_universe_and_backtest_fail_closed_on_malformed_inputs() -> None:
+    p = _synthetic_4h_panel(n_bars=140, seed=7)
+    m = causal_rolling_top_n_mask(p["quote_volume"], p["close"], lookback_bars=10, top_n=3)
+
+    dup_close = p["close"].copy()
+    dup_close.columns = ["BTCUSDT", "BTCUSDT", "SOLUSDT", "BNBUSDT", "XRPUSDT", "WAVESUSDT"]
+    with pytest.raises(ValueError, match="columns must be unique"):
+        causal_rolling_top_n_mask(dup_close, dup_close, lookback_bars=5, top_n=2)
+
+    inf_close = p["close"].copy()
+    inf_close.iloc[10, 0] = np.inf
+    with pytest.raises(ValueError, match="non-finite"):
+        causal_rolling_top_n_mask(p["quote_volume"], inf_close, lookback_bars=5, top_n=2)
+
+    neg_close = p["close"].copy()
+    neg_close.iloc[10, 0] = -1.0
+    with pytest.raises(ValueError, match="strictly positive"):
+        f4_ema_trend_btc_weights(
+            neg_close, m, fast_span=5, slow_span=20, btc_fast=5, btc_slow=20, vol_window=10
+        )
+
+    bad_high = p["high"].copy()
+    bad_high.iloc[10, 0] = p["low"].iloc[10, 0] - 1.0
+    with pytest.raises(ValueError, match="below low"):
+        f3_donchian_breakout_weights(
+            p["close"], bad_high, p["low"], m, entry_window=20, exit_window=10, vol_window=10
+        )
+
+    with pytest.raises(ValueError, match="vol_window"):
+        f4_ema_trend_btc_weights(
+            p["close"], m, fast_span=5, slow_span=20, btc_fast=5, btc_slow=20, vol_window=1
+        )
+    with pytest.raises(ValueError, match="deadband"):
+        f4_ema_trend_btc_weights(
+            p["close"],
+            m,
+            fast_span=5,
+            slow_span=20,
+            btc_fast=5,
+            btc_slow=20,
+            vol_window=10,
+            deadband=float("nan"),
+        )
+
+    w = f4_ema_trend_btc_weights(
+        p["close"], m, fast_span=5, slow_span=20, btc_fast=5, btc_slow=20, vol_window=10
+    )
+    with pytest.raises(ValueError, match="finite"):
+        run_multi_asset_spot_backtest(p["close"], w, fee_bps=float("nan"))
+    with pytest.raises(ValueError, match="less than 100%"):
+        run_multi_asset_spot_backtest(p["close"], w, fee_bps=9_000.0, slippage_bps=1_000.0)
+
+    unlisted_w = w.copy()
+    unlisted_w.iloc[0, 2] = 0.25  # SOLUSDT is NaN before bar 60
+    with pytest.raises(ValueError, match="close price is missing"):
+        run_multi_asset_spot_backtest(p["close"], unlisted_w)
+
+    bt = run_multi_asset_spot_backtest(p["close"], w)
+    metrics = performance_metrics(bt, periods_per_year=365 * 6)
+    assert "cagr" in metrics and "time_in_market" in metrics and "entries" in metrics
+
+
+def test_sleeve2_paper_soak_helpers_enforce_spot_and_rejection_invariants() -> None:
+    with pytest.raises(ValueError, match=">= 0.0"):
+        build_sleeve2_paper_soak_day(
+            date_utc="2026-10-01",
+            input_cutoff_utc=1_790_812_800,
+            target_weights={"BTCUSDT": -0.1},
+            realized_pnl_vnd=0.0,
+            unrealized_pnl_vnd=0.0,
+            fees_vnd=0.0,
+            slippage_bps=1.0,
+            equity_vnd=100_000_000.0,
+        )
+
+    with pytest.raises(ValueError, match="zero leverage"):
+        build_sleeve2_paper_soak_day(
+            date_utc="2026-10-01",
+            input_cutoff_utc=1_790_812_800,
+            target_weights={"BTCUSDT": 0.6, "ETHUSDT": 0.6},
+            realized_pnl_vnd=0.0,
+            unrealized_pnl_vnd=0.0,
+            fees_vnd=0.0,
+            slippage_bps=1.0,
+            equity_vnd=100_000_000.0,
+        )
+
+    mismatch_day = build_sleeve2_paper_soak_day(
+        date_utc="2026-10-01",
+        input_cutoff_utc=1_790_812_800,
+        target_weights={"BTCUSDT": 0.2},
+        realized_pnl_vnd=-10_000.0,
+        unrealized_pnl_vnd=0.0,
+        fees_vnd=5_000.0,
+        slippage_bps=2.0,
+        equity_vnd=249_990_000.0,
+        reconciled=False,
+        pause_reason="ledger balance delta",
+    )
+    rejected = build_sleeve2_paper_soak_receipt([mismatch_day])
+    assert rejected.status == "REJECTED"
+    assert rejected.execution_capability is False
+
+    failed_restart = PaperSoakRestartCheck(
+        observed_at_utc=1_790_812_900,
+        attempt_no=1,
+        checkpoint="day-1-restart",
+        duplicate_intents=1,
+        status="failed",
+        evidence_hash="b" * 64,
+        reason="duplicate intent after restart",
+    )
+    with pytest.raises(PaperSoakError, match="without observed soak days"):
+        build_sleeve2_paper_soak_receipt([], [failed_restart])
+
+
+@pytest.mark.parametrize("strategy", ["f4", "f3"])
+def test_sleeve2_offline_smoke_and_cli_roundtrip(strategy: str, tmp_path, capsys) -> None:
+    smoke = run_sleeve2_offline_smoke(strategy=strategy, soak_days=5, seed=2026)
+    receipt = smoke["receipt"]
+    health = smoke["health_report"]
+
+    assert receipt.status == "OBSERVED"
+    assert receipt.evidence_level == "offline_smoke_fixture"
+    assert receipt.execution_capability is False
+    assert receipt.promotion_allowed is False
+    assert health.verdict == "IN_PROGRESS"
+    assert "non_live_evidence_level:offline_smoke_fixture" in health.blockers
+    assert health.calendar_gap_days == 0
+
+    receipt_path = tmp_path / f"{strategy}_smoke_receipt.json"
+    parser = build_parser()
+    args = parser.parse_args(
+        [
+            "soak-check",
+            "--smoke",
+            "--strategy",
+            strategy,
+            "--days",
+            "5",
+            "--write-receipt",
+            str(receipt_path),
+            "--json",
+        ]
+    )
+    args.handler(args)
+    smoke_out = json.loads(capsys.readouterr().out)
+    assert smoke_out["health_report"]["report_sha256"] == health.report_sha256
+    assert receipt_path.exists()
+
+    audit_args = parser.parse_args(["soak-check", "--receipt", str(receipt_path), "--json"])
+    audit_args.handler(audit_args)
+    audit_out = json.loads(capsys.readouterr().out)
+    assert audit_out["receipt_sha256"] == receipt.receipt_sha256
+    assert audit_out["verdict"] == "IN_PROGRESS"
+    assert audit_out["execution_capability"] is False
+
+    tampered = json.loads(receipt_path.read_text(encoding="utf-8"))
+    tampered["execution_capability"] = True
+    tampered_path = tmp_path / "tampered.json"
+    tampered_path.write_text(json.dumps(tampered), encoding="utf-8")
+    bad_args = parser.parse_args(["soak-check", "--receipt", str(tampered_path)])
+    with pytest.raises(SystemExit, match="execution_capability"):
+        bad_args.handler(bad_args)

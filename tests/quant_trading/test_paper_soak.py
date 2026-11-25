@@ -7,8 +7,10 @@ import pytest
 from quant_trading.paper_soak import (
     PaperSoakDay,
     PaperSoakError,
+    PaperSoakHealthReport,
     PaperSoakReceipt,
     PaperSoakRestartCheck,
+    audit_paper_soak_receipt,
 )
 
 HASH = "a" * 64
@@ -237,4 +239,111 @@ def test_mapping_can_read_legacy_receipt_without_optional_window_or_capabilities
     receipt = PaperSoakReceipt.from_mapping(payload)
 
     assert receipt.as_dict() == PaperSoakReceipt().as_dict()
+
+
+def test_audit_paper_soak_receipt_tracks_lifecycle_and_is_deterministic() -> None:
+    not_run = audit_paper_soak_receipt(PaperSoakReceipt())
+    assert not_run.verdict == "NOT_RUN"
+    assert not_run.blockers == ()
+    assert not_run.execution_capability is False
+    assert not_run.promotion_allowed is False
+
+    in_progress = audit_paper_soak_receipt(
+        PaperSoakReceipt(
+            daily_reconciliation=tuple(_day(i) for i in range(1, 6)),
+            restart_checks=(_restart(),),
+            **_identity(),
+            status="OBSERVED",
+            evidence_level="paper_observation",
+        )
+    )
+    assert in_progress.verdict == "IN_PROGRESS"
+    assert "insufficient_soak_days:5/30" in in_progress.blockers
+    assert "awaiting_owner_review" in in_progress.blockers
+
+    ready = audit_paper_soak_receipt(
+        PaperSoakReceipt(
+            daily_reconciliation=tuple(_day(i) for i in range(1, 31)),
+            restart_checks=(_restart(),),
+            **_identity(),
+            owner_reviewed=False,
+            status="OBSERVED",
+            evidence_level="paper_observation",
+        )
+    )
+    assert ready.verdict == "READY_FOR_OWNER_REVIEW"
+    assert ready.blockers == ("awaiting_owner_review",)
+    assert ready.calendar_gap_days == 0
+
+    accepted_receipt = PaperSoakReceipt(
+        daily_reconciliation=tuple(_day(i) for i in range(1, 31)),
+        restart_checks=(_restart(),),
+        **_identity(),
+        owner_reviewed=True,
+        status="ACCEPTED",
+        evidence_level="paper_observation",
+    )
+    accepted_a = audit_paper_soak_receipt(accepted_receipt, max_slippage_bps=5.0)
+    accepted_b = audit_paper_soak_receipt(accepted_receipt, max_slippage_bps=5.0)
+    assert accepted_a.verdict == "ACCEPTED_OFFLINE_ONLY"
+    assert accepted_a.blockers == ()
+    assert accepted_a.report_sha256 == accepted_b.report_sha256
+    assert accepted_a.promotion_allowed is False
+    assert accepted_a.execution_capability is False
+
+
+def test_audit_paper_soak_receipt_detects_gaps_slippage_and_fill_anomalies() -> None:
+    # Missing 2026-01-03 creates a 1-day calendar gap
+    gapped = PaperSoakReceipt(
+        daily_reconciliation=(_day(1), _day(2), _day(4)),
+        restart_checks=(_restart(),),
+        **_identity(),
+        status="OBSERVED",
+        evidence_level="paper_observation",
+    )
+    strict_report = audit_paper_soak_receipt(gapped, max_calendar_gap_days=0)
+    assert strict_report.verdict == "REJECTED"
+    assert strict_report.calendar_gap_days == 1
+    assert strict_report.missing_dates_utc == ("2026-01-03",)
+    assert "calendar_gap_days_exceeded:1>0" in strict_report.blockers
+
+    budget_report = audit_paper_soak_receipt(gapped, max_calendar_gap_days=1)
+    assert budget_report.verdict == "IN_PROGRESS"
+    assert "calendar_gap_days_within_budget:1" in budget_report.warnings
+
+    slippage_rejected = audit_paper_soak_receipt(gapped, max_calendar_gap_days=1, max_slippage_bps=1.0)
+    assert slippage_rejected.verdict == "REJECTED"
+    assert any(b.startswith("slippage_limit_exceeded:") for b in slippage_rejected.blockers)
+
+    # Excess fills (> intents) must fail closed; unfilled intents (< intents) warn only
+    excess_payload = _day(1).as_dict()
+    excess_payload["fills"] = 3
+    excess_receipt = PaperSoakReceipt(
+        daily_reconciliation=(PaperSoakDay(**excess_payload),),
+        restart_checks=(_restart(),),
+        **_identity(),
+        status="OBSERVED",
+        evidence_level="paper_observation",
+    )
+    excess_report = audit_paper_soak_receipt(excess_receipt)
+    assert excess_report.verdict == "REJECTED"
+    assert "excess_fills_over_intents:1" in excess_report.blockers
+
+    unfilled_payload = _day(1).as_dict()
+    unfilled_payload["paper_intents"] = 2
+    unfilled_payload["fills"] = 1
+    unfilled_receipt = PaperSoakReceipt(
+        daily_reconciliation=(PaperSoakDay(**unfilled_payload),),
+        restart_checks=(_restart(),),
+        **_identity(),
+        status="OBSERVED",
+        evidence_level="paper_observation",
+    )
+    unfilled_report = audit_paper_soak_receipt(unfilled_receipt)
+    assert unfilled_report.verdict == "IN_PROGRESS"
+    assert "unfilled_paper_intent_days:1" in unfilled_report.warnings
+
+    with pytest.raises(PaperSoakError, match="execution_capability"):
+        replace(unfilled_report, execution_capability=True, report_sha256=None)
+    assert isinstance(unfilled_report, PaperSoakHealthReport)
 

@@ -12,15 +12,21 @@ from __future__ import annotations
 import hashlib
 import json
 import math
-from typing import Any
+from collections.abc import Mapping
+from typing import Any, Literal
 
 import numpy as np
 import pandas as pd
 
+from quant_lab.metrics import performance_metrics
 from quant_trading.paper_soak import (
+    MAXIMUM_SOAK_DAYS,
+    MINIMUM_SOAK_DAYS,
     PaperSoakDay,
+    PaperSoakError,
     PaperSoakReceipt,
     PaperSoakRestartCheck,
+    audit_paper_soak_receipt,
 )
 
 
@@ -29,6 +35,52 @@ def _validate_panel(frame: pd.DataFrame, name: str) -> None:
         raise ValueError(f"{name} panel cannot be empty.")
     if not frame.index.is_unique or not frame.index.is_monotonic_increasing:
         raise ValueError(f"{name} index must be unique and sorted ascending.")
+    if not frame.columns.is_unique:
+        raise ValueError(f"{name} columns must be unique.")
+
+
+def _validate_positive_prices(arr: np.ndarray, name: str) -> None:
+    if np.isinf(arr).any():
+        raise ValueError(f"{name} prices cannot contain non-finite +/-inf values.")
+    finite = np.isfinite(arr)
+    if (arr[finite] <= 0.0).any():
+        raise ValueError(f"{name} prices must be strictly positive where present.")
+
+
+def _validate_nonnegative_panel(arr: np.ndarray, name: str) -> None:
+    if np.isinf(arr).any():
+        raise ValueError(f"{name} cannot contain non-finite +/-inf values.")
+    finite = np.isfinite(arr)
+    if (arr[finite] < 0.0).any():
+        raise ValueError(f"{name} cannot contain negative values.")
+
+
+def _validate_positive_int(value: Any, name: str, *, minimum: int = 1) -> int:
+    if type(value) is not int or value < minimum:
+        raise ValueError(f"{name} must be an integer >= {minimum}.")
+    return value
+
+
+def _validate_finite_float(
+    value: Any,
+    name: str,
+    *,
+    minimum: float | None = None,
+    strictly_positive: bool = False,
+) -> float:
+    if isinstance(value, bool):
+        raise ValueError(f"{name} must be finite.")
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be finite.") from exc
+    if not math.isfinite(parsed):
+        raise ValueError(f"{name} must be finite.")
+    if strictly_positive and parsed <= 0.0:
+        raise ValueError(f"{name} must be strictly positive.")
+    if minimum is not None and parsed < minimum:
+        raise ValueError(f"{name} must be >= {minimum}.")
+    return parsed
 
 
 def _canonical_sha256(payload: Any) -> str:
@@ -53,14 +105,19 @@ def causal_rolling_top_n_mask(
     _validate_panel(close, "close")
     if not quote_volume.index.equals(close.index) or list(quote_volume.columns) != list(close.columns):
         raise ValueError("quote_volume and close must share identical index and columns.")
-    if lookback_bars <= 0 or top_n <= 0:
-        raise ValueError("lookback_bars and top_n must be positive.")
+    _validate_positive_int(lookback_bars, "lookback_bars", minimum=1)
+    _validate_positive_int(top_n, "top_n", minimum=1)
+    min_valid_frac = _validate_finite_float(min_valid_frac, "min_valid_frac")
     if not 0.0 < min_valid_frac <= 1.0:
         raise ValueError("min_valid_frac must be in (0, 1].")
 
     qv = quote_volume.to_numpy(dtype=np.float64, copy=False)
     cl = close.to_numpy(dtype=np.float64, copy=False)
+    _validate_nonnegative_panel(qv, "quote_volume")
+    _validate_positive_prices(cl, "close")
+
     n_t, n_k = qv.shape
+    cols = [str(col) for col in close.columns]
     mask = np.zeros((n_t, n_k), dtype=bool)
     min_req = max(1, int(math.ceil(lookback_bars * min_valid_frac)))
 
@@ -76,7 +133,7 @@ def causal_rolling_top_n_mask(
         if len(elig_idx) <= top_n:
             mask[t, elig_idx] = True
         else:
-            order = sorted(elig_idx.tolist(), key=lambda j: (-float(mean_qv[j]), j))
+            order = sorted(elig_idx.tolist(), key=lambda j: (-float(mean_qv[j]), cols[j]))
             mask[t, order[:top_n]] = True
 
     return pd.DataFrame(mask, index=close.index, columns=close.columns)
@@ -90,7 +147,7 @@ def _causal_ema_matrix(closes: np.ndarray, span: int) -> np.ndarray:
         prev = np.nan
         for t in range(n_t):
             c = closes[t, j]
-            if not np.isfinite(c):
+            if not np.isfinite(c) or c <= 0.0:
                 prev = np.nan
                 continue
             prev = c if not np.isfinite(prev) else (alpha * c + (1.0 - alpha) * prev)
@@ -99,9 +156,15 @@ def _causal_ema_matrix(closes: np.ndarray, span: int) -> np.ndarray:
 
 
 def _causal_rolling_vol(closes: np.ndarray, window: int) -> np.ndarray:
+    _validate_positive_int(window, "vol_window", minimum=2)
     n_t, n_k = closes.shape
     rets = np.full((n_t, n_k), np.nan, dtype=np.float64)
-    valid = np.isfinite(closes[1:]) & np.isfinite(closes[:-1]) & (closes[:-1] > 0.0)
+    valid = (
+        np.isfinite(closes[1:])
+        & np.isfinite(closes[:-1])
+        & (closes[:-1] > 0.0)
+        & (closes[1:] > 0.0)
+    )
     rets[1:][valid] = closes[1:][valid] / closes[:-1][valid] - 1.0
 
     ok = np.isfinite(rets)
@@ -123,8 +186,9 @@ def _causal_rolling_vol(closes: np.ndarray, window: int) -> np.ndarray:
 
 
 def _apply_rebalance_deadband(raw_w: np.ndarray, deadband: float) -> np.ndarray:
-    if deadband <= 0.0:
-        return raw_w
+    deadband = _validate_finite_float(deadband, "deadband", minimum=0.0)
+    if deadband == 0.0:
+        return raw_w.copy()
     out = np.zeros_like(raw_w)
     prev = np.zeros(raw_w.shape[1], dtype=np.float64)
     for t in range(len(raw_w)):
@@ -155,14 +219,24 @@ def f4_ema_trend_btc_weights(
 ) -> pd.DataFrame:
     """Sleeve #2 Primary (`F4_4H_EMA_24_120_BTC`): Causal EMA trend + BTC macro filter + vol targeting."""
     _validate_panel(close, "close")
+    _validate_panel(eligible_mask, "eligible_mask")
     if not close.index.equals(eligible_mask.index) or list(close.columns) != list(eligible_mask.columns):
         raise ValueError("close and eligible_mask must share identical index and columns.")
     if btc_symbol not in close.columns:
         raise ValueError(f"btc_symbol '{btc_symbol}' must exist in close columns.")
-    if fast_span <= 0 or slow_span <= fast_span or btc_fast <= 0 or btc_slow <= btc_fast:
+    _validate_positive_int(fast_span, "fast_span", minimum=1)
+    _validate_positive_int(slow_span, "slow_span", minimum=1)
+    _validate_positive_int(btc_fast, "btc_fast", minimum=1)
+    _validate_positive_int(btc_slow, "btc_slow", minimum=1)
+    if slow_span <= fast_span or btc_slow <= btc_fast:
         raise ValueError("EMA spans must satisfy 0 < fast < slow.")
+    _validate_positive_int(vol_window, "vol_window", minimum=2)
+    target_ann_vol = _validate_finite_float(target_ann_vol, "target_ann_vol", strictly_positive=True)
+    bars_per_year = _validate_finite_float(bars_per_year, "bars_per_year", strictly_positive=True)
+    deadband = _validate_finite_float(deadband, "deadband", minimum=0.0)
 
     cl = close.to_numpy(dtype=np.float64, copy=False)
+    _validate_positive_prices(cl, "close")
     elig = eligible_mask.to_numpy(dtype=bool, copy=False)
     btc_idx = list(close.columns).index(btc_symbol)
 
@@ -202,14 +276,28 @@ def f3_donchian_breakout_weights(
     """Sleeve #2 Low-Turnover Backup (`F3_DONCHIAN_4H_120_60`): Causal Donchian breakout + vol targeting."""
     _validate_panel(close, "close")
     for name, df in (("high", high), ("low", low), ("eligible_mask", eligible_mask)):
+        _validate_panel(df, name)
         if not close.index.equals(df.index) or list(close.columns) != list(df.columns):
             raise ValueError(f"{name} must align exactly with close.")
-    if entry_window <= 0 or exit_window <= 0 or exit_window >= entry_window:
+    _validate_positive_int(entry_window, "entry_window", minimum=1)
+    _validate_positive_int(exit_window, "exit_window", minimum=1)
+    if exit_window >= entry_window:
         raise ValueError("Donchian windows must satisfy 0 < exit_window < entry_window.")
+    _validate_positive_int(vol_window, "vol_window", minimum=2)
+    target_ann_vol = _validate_finite_float(target_ann_vol, "target_ann_vol", strictly_positive=True)
+    bars_per_year = _validate_finite_float(bars_per_year, "bars_per_year", strictly_positive=True)
+    deadband = _validate_finite_float(deadband, "deadband", minimum=0.0)
 
     cl = close.to_numpy(dtype=np.float64, copy=False)
     hi = high.to_numpy(dtype=np.float64, copy=False)
     lo = low.to_numpy(dtype=np.float64, copy=False)
+    _validate_positive_prices(cl, "close")
+    _validate_positive_prices(hi, "high")
+    _validate_positive_prices(lo, "low")
+    hl_both = np.isfinite(hi) & np.isfinite(lo)
+    if (hi[hl_both] < lo[hl_both]).any():
+        raise ValueError("high prices cannot be below low prices.")
+
     elig = eligible_mask.to_numpy(dtype=bool, copy=False)
     n_t, n_k = cl.shape
 
@@ -257,12 +345,20 @@ def run_multi_asset_spot_backtest(
 ) -> pd.DataFrame:
     """Strictly causal t -> t+1 multi-asset spot long/cash backtest with delisting exit haircut."""
     _validate_panel(close, "close")
+    _validate_panel(target_weights, "target_weights")
     if not close.index.equals(target_weights.index) or list(close.columns) != list(target_weights.columns):
         raise ValueError("close and target_weights must share identical index and columns.")
-    if fee_bps < 0 or slippage_bps < 0 or delist_haircut_bps < 0:
-        raise ValueError("Costs and haircuts cannot be negative.")
+    fee_bps = _validate_finite_float(fee_bps, "fee_bps", minimum=0.0)
+    slippage_bps = _validate_finite_float(slippage_bps, "slippage_bps", minimum=0.0)
+    delist_haircut_bps = _validate_finite_float(delist_haircut_bps, "delist_haircut_bps", minimum=0.0)
+    if fee_bps + slippage_bps >= 10_000.0:
+        raise ValueError("Combined trading costs must be less than 100% per unit turnover.")
+    if delist_haircut_bps > 10_000.0:
+        raise ValueError("delist_haircut_bps cannot exceed 100%.")
 
     cl = close.to_numpy(dtype=np.float64, copy=False)
+    _validate_positive_prices(cl, "close")
+
     tw = target_weights.fillna(0.0).to_numpy(dtype=np.float64, copy=True)
     if not np.isfinite(tw).all() or (tw < -1e-12).any():
         raise ValueError("Spot target_weights must be finite and non-negative.")
@@ -271,10 +367,12 @@ def run_multi_asset_spot_backtest(
     if (row_sums > 1.0 + 1e-6).any():
         raise ValueError("Spot target_weights row sum cannot exceed 1.0 (zero leverage).")
     tw = np.where(row_sums > 1.0, tw / np.maximum(row_sums, 1e-12), tw)
+    if ((~np.isfinite(cl)) & (tw > 1e-12)).any():
+        raise ValueError("Cannot allocate non-zero target weight where close price is missing.")
 
     n_t, n_k = cl.shape
     rets = np.zeros((n_t, n_k), dtype=np.float64)
-    valid_ret = np.isfinite(cl[1:]) & np.isfinite(cl[:-1]) & (cl[:-1] > 0.0)
+    valid_ret = np.isfinite(cl[1:]) & np.isfinite(cl[:-1]) & (cl[:-1] > 0.0) & (cl[1:] > 0.0)
     rets[1:][valid_ret] = cl[1:][valid_ret] / cl[:-1][valid_ret] - 1.0
 
     # Strict causal shift: target_weights[t] becomes held[t+1]
@@ -295,6 +393,7 @@ def run_multi_asset_spot_backtest(
     net = gross - cost
     equity = np.cumprod(1.0 + net)
     drawdown = equity / np.maximum.accumulate(np.r_[1.0, equity])[1:] - 1.0
+    gross_exposure = np.sum(held, axis=1)
 
     return pd.DataFrame(
         {
@@ -302,7 +401,8 @@ def run_multi_asset_spot_backtest(
             "cost": cost,
             "strategy_return": net,
             "turnover": turnover,
-            "gross_exposure": np.sum(held, axis=1),
+            "position": gross_exposure,
+            "gross_exposure": gross_exposure,
             "delist_exit_weight": np.sum(delist_w, axis=1),
             "equity": equity,
             "drawdown": drawdown,
@@ -315,7 +415,7 @@ def build_sleeve2_paper_soak_day(
     *,
     date_utc: str,
     input_cutoff_utc: int,
-    target_weights: dict[str, float],
+    target_weights: Mapping[str, float],
     realized_pnl_vnd: float,
     unrealized_pnl_vnd: float,
     fees_vnd: float,
@@ -324,19 +424,38 @@ def build_sleeve2_paper_soak_day(
     reconciled: bool = True,
     healthy: bool = True,
     pause_reason: str | None = None,
+    fills: int | None = None,
 ) -> PaperSoakDay:
     """Create a canonical-hashed PaperSoakDay observation for Sleeve #2 offline soak accounting."""
-    active_intents = sum(1 for v in target_weights.values() if abs(float(v)) > 1e-9)
-    equity_hash = _canonical_sha256({"date_utc": date_utc, "equity_vnd": round(float(equity_vnd), 2)})
-    ledger_hash = _canonical_sha256(
-        {"date_utc": date_utc, "weights": {k: round(float(v), 6) for k, v in sorted(target_weights.items())}}
-    )
+    if not isinstance(target_weights, Mapping):
+        raise ValueError("target_weights must be a mapping.")
+    if type(reconciled) is not bool or type(healthy) is not bool:
+        raise ValueError("reconciled and healthy must be booleans.")
+    equity_vnd = _validate_finite_float(equity_vnd, "equity_vnd", minimum=0.0)
+
+    cleaned_weights: dict[str, float] = {}
+    total_weight = 0.0
+    for symbol, weight in sorted(target_weights.items()):
+        if not isinstance(symbol, str) or not symbol.strip():
+            raise ValueError("target_weights keys must be non-empty symbol strings.")
+        parsed_w = _validate_finite_float(weight, f"target_weights[{symbol!r}]", minimum=0.0)
+        if parsed_w > 1.0 + 1e-6:
+            raise ValueError("Spot target_weights cannot exceed 1.0 per asset.")
+        cleaned_weights[symbol] = round(parsed_w, 6)
+        total_weight += parsed_w
+    if total_weight > 1.0 + 1e-6:
+        raise ValueError("Spot target_weights total cannot exceed 1.0 (zero leverage).")
+
+    active_intents = sum(1 for v in cleaned_weights.values() if v > 1e-9)
+    resolved_fills = (active_intents if reconciled else 0) if fills is None else fills
+    equity_hash = _canonical_sha256({"date_utc": date_utc, "equity_vnd": round(equity_vnd, 2)})
+    ledger_hash = _canonical_sha256({"date_utc": date_utc, "weights": cleaned_weights})
     return PaperSoakDay(
         date_utc=date_utc,
         input_cutoff_utc=input_cutoff_utc,
-        candidate_count=len(target_weights),
+        candidate_count=len(cleaned_weights),
         paper_intents=active_intents,
-        fills=active_intents if reconciled else 0,
+        fills=resolved_fills,
         realized_pnl_vnd=realized_pnl_vnd,
         unrealized_pnl_vnd=unrealized_pnl_vnd,
         fees_vnd=fees_vnd,
@@ -358,19 +477,35 @@ def build_sleeve2_paper_soak_receipt(
     fence_token: str = "offline-prep-only",
     strategy_name: str = "F4_4H_EMA_24_120_BTC",
     owner_reviewed: bool = False,
+    evidence_level: str = "offline_soak_evidence",
 ) -> PaperSoakReceipt:
     """Assemble a fail-closed PREP_ONLY_OFFLINE PaperSoakReceipt (execution_capability always False)."""
     if not days:
+        if restart_checks or owner_reviewed:
+            raise PaperSoakError("Cannot attach restart checks or owner review without observed soak days.")
         return PaperSoakReceipt()
+    if not isinstance(strategy_name, str) or not strategy_name.strip():
+        raise PaperSoakError("strategy_name must be a non-empty string.")
+
     cfg_sha = _canonical_sha256({"universe": "causal_top15_30d_qv", "fee_bps": 10.0, "slippage_bps": 5.0})
-    strat_sha = _canonical_sha256({"strategy": strategy_name, "spot_only": True, "leverage": 1.0})
+    strat_sha = _canonical_sha256({"strategy": strategy_name.strip(), "spot_only": True, "leverage": 1.0})
     risk_sha = _canonical_sha256({"max_gross": 1.0, "max_coin": 0.25, "dd_kill_pct": 12.0})
 
+    has_hard_failure = any(d.reconciliation_status == "mismatch" for d in days) or any(
+        c.status == "failed" or c.duplicate_intents > 0 for c in restart_checks
+    )
     all_ok = all(d.reconciliation_status == "reconciled" and d.health_status == "healthy" for d in days)
     restarts_ok = bool(restart_checks) and all(
         c.status == "passed" and c.duplicate_intents == 0 for c in restart_checks
     )
-    status = "ACCEPTED" if (len(days) >= 30 and all_ok and restarts_ok and owner_reviewed) else "OBSERVED"
+    if has_hard_failure:
+        status: Literal["OBSERVED", "ACCEPTED", "REJECTED"] = "REJECTED"
+    elif len(days) >= MINIMUM_SOAK_DAYS and all_ok and restarts_ok and owner_reviewed:
+        status = "ACCEPTED"
+    elif len(days) >= MINIMUM_SOAK_DAYS and owner_reviewed:
+        status = "REJECTED"
+    else:
+        status = "OBSERVED"
     return PaperSoakReceipt(
         daily_reconciliation=tuple(days),
         restart_checks=tuple(restart_checks),
@@ -382,5 +517,117 @@ def build_sleeve2_paper_soak_receipt(
         risk_budget_sha256=risk_sha,
         owner_reviewed=owner_reviewed,
         status=status,
-        evidence_level="offline_soak_evidence",
+        evidence_level=evidence_level,
     )
+
+
+def run_sleeve2_offline_smoke(
+    *,
+    strategy: Literal["f4", "f3"] = "f4",
+    soak_days: int = 5,
+    seed: int = 2026,
+    initial_equity_vnd: float = 250_000_000.0,
+    fee_bps: float = 10.0,
+    slippage_bps: float = 5.0,
+) -> dict[str, Any]:
+    """Run a deterministic offline Sleeve #2 paper-soak smoke pipeline (zero network, OrderSend = 0).
+
+    Emits an OBSERVED `offline_smoke_fixture` receipt that can never spoof an ACCEPTED 30-day soak.
+    """
+    if strategy not in {"f4", "f3"}:
+        raise ValueError("strategy must be 'f4' or 'f3'.")
+    _validate_positive_int(soak_days, "soak_days", minimum=1)
+    if soak_days > MAXIMUM_SOAK_DAYS:
+        raise ValueError(f"soak_days cannot exceed {MAXIMUM_SOAK_DAYS}.")
+    initial_equity_vnd = _validate_finite_float(
+        initial_equity_vnd, "initial_equity_vnd", strictly_positive=True
+    )
+
+    bars_per_day = 6
+    warmup_bars = 360
+    n_bars = warmup_bars + soak_days * bars_per_day
+    rng = np.random.default_rng(seed)
+    idx = pd.date_range("2024-01-01", periods=n_bars, freq="4h", tz="UTC")
+    cols = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "XRPUSDT", "WAVESUSDT"]
+    rets = rng.normal(0.0005, 0.014, size=(n_bars, len(cols)))
+    rets[:, 0] += 0.0012
+    close_arr = 100.0 * np.cumprod(1.0 + rets, axis=0)
+    high_arr = close_arr * (1.0 + rng.uniform(0.002, 0.02, size=close_arr.shape))
+    low_arr = close_arr * (1.0 - rng.uniform(0.002, 0.02, size=close_arr.shape))
+    qv_arr = rng.uniform(5e6, 2e8, size=close_arr.shape)
+    for arr in (close_arr, high_arr, low_arr, qv_arr):
+        arr[:60, 2] = np.nan
+        arr[warmup_bars - 30 :, 5] = np.nan
+
+    close = pd.DataFrame(close_arr, index=idx, columns=cols)
+    high = pd.DataFrame(high_arr, index=idx, columns=cols)
+    low = pd.DataFrame(low_arr, index=idx, columns=cols)
+    qv = pd.DataFrame(qv_arr, index=idx, columns=cols)
+
+    mask = causal_rolling_top_n_mask(qv, close, lookback_bars=30, top_n=4)
+    if strategy == "f4":
+        weights = f4_ema_trend_btc_weights(close, mask, btc_fast=30, btc_slow=120, vol_window=60)
+        strategy_name = "F4_4H_EMA_24_120_BTC"
+    else:
+        weights = f3_donchian_breakout_weights(
+            close, high, low, mask, entry_window=60, exit_window=30, vol_window=60
+        )
+        strategy_name = "F3_DONCHIAN_4H_120_60"
+
+    bt = run_multi_asset_spot_backtest(close, weights, fee_bps=fee_bps, slippage_bps=slippage_bps)
+    metrics = performance_metrics(bt, periods_per_year=365 * bars_per_day)
+
+    soak_bt = bt.iloc[warmup_bars:]
+    soak_w = weights.iloc[warmup_bars:]
+    day_groups = sorted(set(soak_bt.index.strftime("%Y-%m-%d")))[-soak_days:]
+
+    days: list[PaperSoakDay] = []
+    prev_equity_vnd = initial_equity_vnd * float(bt["equity"].iloc[warmup_bars - 1])
+    for date_str in day_groups:
+        day_mask = soak_bt.index.strftime("%Y-%m-%d") == date_str
+        day_bt = soak_bt.loc[day_mask]
+        day_w = soak_w.loc[day_mask]
+        end_equity_vnd = initial_equity_vnd * float(day_bt["equity"].iloc[-1])
+        day_pnl_vnd = end_equity_vnd - prev_equity_vnd
+        day_fees_vnd = float(day_bt["cost"].sum()) * prev_equity_vnd
+        cutoff_utc = int(day_bt.index[-1].timestamp())
+        eod_weights = {col: float(day_w[col].iloc[-1]) for col in cols}
+        days.append(
+            build_sleeve2_paper_soak_day(
+                date_utc=date_str,
+                input_cutoff_utc=cutoff_utc,
+                target_weights=eod_weights,
+                realized_pnl_vnd=round(day_pnl_vnd, 2),
+                unrealized_pnl_vnd=0.0,
+                fees_vnd=round(day_fees_vnd, 2),
+                slippage_bps=slippage_bps,
+                equity_vnd=round(end_equity_vnd, 2),
+            )
+        )
+        prev_equity_vnd = end_equity_vnd
+
+    restart = PaperSoakRestartCheck(
+        observed_at_utc=days[-1].input_cutoff_utc,
+        attempt_no=1,
+        checkpoint=f"smoke-day-{len(days)}-restart",
+        duplicate_intents=0,
+        status="passed",
+        evidence_hash=_canonical_sha256({"strategy": strategy_name, "seed": seed, "days": len(days)}),
+    )
+    receipt = build_sleeve2_paper_soak_receipt(
+        days,
+        [restart],
+        run_id=f"sleeve2-smoke-{strategy}-seed{seed}",
+        attempt_no=1,
+        fence_token="offline-smoke-only",
+        strategy_name=strategy_name,
+        owner_reviewed=False,
+        evidence_level="offline_smoke_fixture",
+    )
+    health = audit_paper_soak_receipt(receipt)
+    return {
+        "strategy": strategy_name,
+        "backtest_metrics": metrics,
+        "receipt": receipt,
+        "health_report": health,
+    }
